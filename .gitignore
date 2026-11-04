@@ -1,0 +1,14 @@
+# Local environment
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.DS_Store
+
+# Data: raw inputs are downloaded/generated, processed outputs are rebuildable.
+# Keep the directory skeleton only.
+data/raw/**
+data/processed/**
+!data/raw/.gitkeep
+!data/processed/.gitkeep
