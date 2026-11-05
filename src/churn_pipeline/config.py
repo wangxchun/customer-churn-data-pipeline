@@ -56,6 +56,11 @@ class Paths:
         return self.processed / "curated"
 
     @property
+    def features(self) -> Path:
+        """Phase 2 outputs: split files, fitted preprocessor, feature report."""
+        return self.processed / "features"
+
+    @property
     def sqlite_db(self) -> Path:
         return self.processed / "churn.db"
 

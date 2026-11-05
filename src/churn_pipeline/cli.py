@@ -7,6 +7,8 @@ from pathlib import Path
 
 from .config import DEFAULT_PATHS, Paths
 from .download import download_ibm_csv
+from .features import SplitConfig, run_features
+from .features import render_markdown as render_feature_report
 from .pipeline import run
 from .summary import render_markdown
 from .synthetic import write_synthetic
@@ -28,6 +30,12 @@ def main(argv: list[str] | None = None) -> int:
     r.add_argument("--events", type=Path, nargs="*",
                    help="ingest only these event files (default: all *.jsonl in landing dir)")
 
+    feat = sub.add_parser(
+        "build-features",
+        help="Phase 2: split customer_master, fit preprocessing on train, write features",
+    )
+    feat.add_argument("--seed", type=int, default=42, help="split random seed")
+
     args = parser.parse_args(argv)
     paths = Paths(args.data_dir)
 
@@ -41,6 +49,10 @@ def main(argv: list[str] | None = None) -> int:
         summary = run(paths, event_files=args.events)
         print(render_markdown(summary))
         print(f"Summary written to {paths.summary_md}")
+    elif args.command == "build-features":
+        report = run_features(paths, SplitConfig(seed=args.seed))
+        print(render_feature_report(report, report["input_sha256"]))
+        print(f"Features written to {paths.features}")
     return 0
 
 

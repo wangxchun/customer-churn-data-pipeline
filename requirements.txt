@@ -5,6 +5,13 @@ pyarrow==26.0.1
 numpy==2.5.4
 python-dateutil==4.0.0
 tzdata==2026.6
+# Phase 2 (added 2026-11-05)
+scikit-learn==1.9.1
+scipy==1.18.1
+joblib==1.6.0
+threadpoolctl==3.8.0
+narwhals==2.28.0
+cloudpickle==3.1.2
 pytest==9.2.0
 iniconfig==2.3.1
 packaging==26.3

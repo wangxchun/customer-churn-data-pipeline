@@ -5,12 +5,14 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "churn-pipeline"
 version = "0.1.0"
-description = "Phase 1 data ingestion and storage pipeline for customer churn (learning project, local-only)."
+description = "Phase 1 ingestion/storage and Phase 2 feature pipeline for customer churn (learning project, local-only)."
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
     "pandas>=2.2",
     "pyarrow>=15",
+    "scikit-learn>=1.2",  # Phase 2; set_output(transform="pandas") needs >= 1.2. Verified only with 1.9.1.
+    "joblib>=1.2",
 ]
 
 [project.optional-dependencies]

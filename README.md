@@ -1,8 +1,8 @@
-# Customer Churn Data Pipeline: Phase 1 (Ingestion and Storage)
+# Customer Churn Data Pipeline: Phase 1 (Ingestion and Storage) and Phase 2 (Features)
 
 A small, local, reproducible pipeline that collects, validates, merges, and stores data for a customer-churn classification task. I built it as a learning project for **AWS Certified Machine Learning Engineer – Associate (MLA-C02), Domain 1, Task 1.1 "Collect and store data"**. It uses no AWS or other paid services.
 
-Phase 1 covers only ingestion and storage. Phase 2 (transformation and feature engineering) and Phase 3 (data quality and bias) haven't been implemented yet.
+Phase 1 covers ingestion and storage. Phase 2 covers transformation and feature engineering: missing values, encoding, scaling, a reproducible split, and leakage prevention (see [Phase 2](#phase-2-features-and-leakage-prevention)). No model is trained yet, and Phase 3 (data quality and bias) hasn't been implemented. Known open bugs are tracked in [`TECH_DEBT.md`](TECH_DEBT.md).
 
 ---
 
@@ -20,6 +20,7 @@ pip install -e . --no-deps             # installs the `churn-pipeline` command
 churn-pipeline download                # fetch IBM CSV, verify SHA-256
 churn-pipeline generate-synthetic      # write synthetic Sources B and C
 churn-pipeline run                     # validate → store → ingest events → merge → summarise
+churn-pipeline build-features          # Phase 2: split, fit preprocessing on train only, write features
 pytest                                 # run the tests
 ```
 
@@ -219,10 +220,32 @@ The skills below are taken from the official [MLA-C02 Domain 1 guide](https://do
 - **Conflict policy is "first seen wins".** A deliberate correction from upstream would be rejected and need manual handling.
 - **Orphan events are stored but not re-checked automatically.** If a matching customer arrives later, the features pick the events up on the next run, but nothing raises an alert about it.
 - Validation runs row by row in Python, which is clear but slow above roughly 10⁶ rows.
+- **Known open bugs:** `replace_table()` isn't atomic, and `events.event_id` accepts `NULL` at the database level. Neither affects Phase 2 outputs. Details, failure scenarios, and planned fixes are in [`TECH_DEBT.md`](TECH_DEBT.md).
 
-## Next step: Phase 2
+## Phase 2: features and leakage prevention
 
-Starting from `customer_master.parquet`: impute the 11 null `total_charges` values (0 is defensible when `tenure == 0`); encode categoricals; define a cutoff date for the event features; and make a stratified train/validation/test split *before* fitting any scaler or encoder.
+`churn-pipeline build-features` reads `curated/customer_master.parquet` and writes to `data/processed/features/`:
+
+| File | Content |
+|---|---|
+| `train.parquet`, `validation.parquet`, `test.parquet` | `customer_id`, 40 feature columns, `churn` (0/1). Use `features.load_split()` to get `(ids, X, y)` |
+| `split_assignments.parquet` | `customer_id` → `train` / `validation` / `test` |
+| `preprocessor.joblib` | The fitted `ColumnTransformer` (pickle: load only files you produced, with the same scikit-learn version) |
+| `feature_report.{json,md}` | Input checksum, split sizes and churn rates, fill counts, train-only scaling parameters and categories, excluded columns with reasons |
+
+| Decision | Choice | Reason |
+|---|---|---|
+| Feature selection | 19 IBM columns. Every input column must be classified as feature, ID, target, or excluded-with-reason, or the run fails | A new column can't become a model input by accident |
+| Excluded | `customer_id`, `churn`, all synthetic profile and event columns | IDs don't generalise; the target can't be an input; the synthetic sources were generated independently of churn |
+| Missing `total_charges` | Filled with the constant 0.0, only when `tenure_months == 0`; any other null fails the run | All 11 blanks have zero tenure, so "not billed yet" is inferred, **not confirmed** by IBM. A constant learns nothing from the data, so it can't leak |
+| Split | Stratified on churn, 70/15/15, seed 42, rows sorted by `customer_id` first | Same seed and data give the same split, whatever the row order |
+| Encoding | `OneHotEncoder(drop="if_binary", handle_unknown="ignore")` | Yes/No becomes one 0/1 column; a category unseen in training becomes all zeros |
+| Scaling | `StandardScaler` on `tenure_months`, `monthly_charges`, `total_charges`; `senior_citizen` passed through | It's already 0/1 |
+| Leakage control | `fit` is called once, on training rows only; validation and test are only transformed | Tests check that changing holdout rows doesn't change the fitted parameters or the training features |
+
+Result on the real data: 4,929 / 1,057 / 1,057 rows, churn rate 26.54% / 26.58% / 26.49%, and the 11 filled values fall 9 / 1 / 1 across the splits.
+
+**What this split does not show.** The IBM data has no snapshot date and no churn date, so the split is random, not temporal. It estimates performance on unseen customers from the same snapshot. It says nothing about how a model would do on a future period. Event features stay excluded until a cutoff date can be defined.
 
 ## Tests
 
