@@ -1,8 +1,8 @@
-# Customer Churn Data Pipeline: Phase 1 (Ingestion and Storage) and Phase 2 (Features)
+# Customer Churn Data Pipeline: Phase 1 (Ingestion and Storage) and Phase 2 (Data Preparation)
 
 A small, local, reproducible pipeline that collects, validates, merges, and stores data for a customer-churn classification task. I built it as a learning project for **AWS Certified Machine Learning Engineer – Associate (MLA-C02), Domain 1, Task 1.1 "Collect and store data"**. It uses no AWS or other paid services.
 
-Phase 1 covers ingestion and storage. Phase 2 covers transformation and feature engineering: missing values, encoding, scaling, a reproducible split, and leakage prevention (see [Phase 2](#phase-2-features-and-leakage-prevention)). No model is trained yet, and Phase 3 (data quality and bias) hasn't been implemented. Known open bugs are tracked in [`TECH_DEBT.md`](TECH_DEBT.md).
+Phase 1 covers ingestion and storage. Phase 2 covers transformation and feature engineering: missing values, encoding, scaling, a reproducible split, and leakage prevention (see [Phase 2](#phase-2-features-and-leakage-prevention)). Roadmap: Phase 1 data ingestion and storage; Phase 2 data preparation; Phase 3 ML and AI model development; Phase 4 deployment, orchestration, monitoring, and maintenance. Phases 3 and 4 haven't been implemented, and no model has been trained yet. Known open bugs are tracked in [`TECH_DEBT.md`](TECH_DEBT.md).
 
 ---
 
