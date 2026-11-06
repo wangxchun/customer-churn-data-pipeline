@@ -138,7 +138,7 @@ def check_input(master: pd.DataFrame) -> None:
     if ids.isna().any() or not ids.is_unique:
         raise DataContractError("customer_id must be non-null and unique (one row per customer)")
 
-    bad_labels = ~master[TARGET_COLUMN].isin(list(LABEL_MAP)).fillna(False).astype(bool)
+    bad_labels = ~master[TARGET_COLUMN].isin(LABEL_MAP)
     if bad_labels.any():
         raise DataContractError(
             f"churn must be one of {sorted(LABEL_MAP)}; {int(bad_labels.sum())} rows are not"
