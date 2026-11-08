@@ -264,7 +264,7 @@ Phase 3 reads the raw `customer_master.parquet` plus Phase 2's `split_assignment
 | validation (1,057) | Cross-family selection, threshold, calibration check, explanations, subgroup metrics |
 | test (1,057) | Only `churn-pipeline evaluate`. A second read is refused unless `--force`, and every read is logged in `test_access.json` |
 
-Design choices (approved as D1–D7; reasoning in `docs/PHASE3_DESIGN_REVIEW_ZH-TW.md`):
+Design choices (approved as D1–D7; the reasoning is in a local design review under `docs/`, which isn't tracked):
 
 - **Candidates:** a prior-only dummy, logistic regression, random forest, `HistGradientBoostingClassifier` (used instead of XGBoost, which isn't installed), and a soft-voting LR + HGB ensemble. No new dependencies.
 - **Selection:** the highest validation PR AUC is the reference. Any candidate whose paired-bootstrap 95% CI of the gap includes 0 counts as "within noise", and the simplest of those wins.
