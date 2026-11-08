@@ -61,6 +61,15 @@ class Paths:
         return self.processed / "features"
 
     @property
+    def models(self) -> Path:
+        """Phase 3 outputs: one atomic directory per training run, plus diagnostics.
+
+        Under processed/ (already git-ignored, rebuildable): deleting data/processed/
+        also deletes trained models and the test-set access log.
+        """
+        return self.processed / "models"
+
+    @property
     def sqlite_db(self) -> Path:
         return self.processed / "churn.db"
 

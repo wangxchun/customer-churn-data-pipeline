@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "churn-pipeline"
 version = "0.1.0"
-description = "Phase 1 ingestion/storage and Phase 2 feature pipeline for customer churn (learning project, local-only)."
+description = "Phase 1 ingestion/storage, Phase 2 features, and Phase 3 model development for customer churn (learning project, local-only)."
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [

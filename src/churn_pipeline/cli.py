@@ -36,6 +36,31 @@ def main(argv: list[str] | None = None) -> int:
     )
     feat.add_argument("--seed", type=int, default=42, help="split random seed")
 
+    # Phase 3. Only `evaluate` reads the test split.
+    tr = sub.add_parser("train", help="Phase 3: tune, select, and threshold on train/validation "
+                                      "(never reads test)")
+    tr.add_argument("--seed", type=int, default=42, help="CV/search/bootstrap seed")
+    tr.add_argument("--n-iter", type=int, default=20, help="random-search trials per family")
+    tr.add_argument("--fn-cost", type=float, default=5.0,
+                    help="cost of a missed churner (illustrative assumption)")
+    tr.add_argument("--fp-cost", type=float, default=1.0,
+                    help="cost of an unnecessary retention offer (illustrative assumption)")
+    tr.add_argument("--n-boot", type=int, default=2000, help="bootstrap resamples")
+
+    ev = sub.add_parser("evaluate", help="Phase 3: one-time final evaluation on the test split")
+    ev.add_argument("--run", required=True, help="run id under models/")
+    ev.add_argument("--force", action="store_true",
+                    help="re-read the test split although it was already used (logged)")
+
+    dg = sub.add_parser("diagnose", help="Phase 3: learning diagnostics (train/validation only)")
+    dg.add_argument("--run", help="use this run's champion for the drift experiment")
+    dg.add_argument("--seed", type=int, default=42)
+    dg.add_argument("--n-iter", type=int, default=20)
+
+    cp = sub.add_parser("compare", help="Phase 3: offline champion/challenger on validation")
+    cp.add_argument("--champion", required=True)
+    cp.add_argument("--challenger", required=True)
+
     args = parser.parse_args(argv)
     paths = Paths(args.data_dir)
 
@@ -53,6 +78,31 @@ def main(argv: list[str] | None = None) -> int:
         report = run_features(paths, SplitConfig(seed=args.seed))
         print(render_feature_report(report, report["input_sha256"]))
         print(f"Features written to {paths.features}")
+    elif args.command == "train":
+        from .modeling import TrainConfig, run_training
+        out = run_training(paths, TrainConfig(seed=args.seed, n_iter=args.n_iter, fn_cost=args.fn_cost,
+                                              fp_cost=args.fp_cost, n_boot=args.n_boot))
+        print((out["run_dir"] / "report.md").read_text())
+        print(f"Run {out['run_id']} written to {out['run_dir']} (test split not read)")
+    elif args.command == "evaluate":
+        from .evaluation import TestSetAlreadyUsedError, run_final_evaluation
+        try:
+            out = run_final_evaluation(paths, args.run, force=args.force)
+        except TestSetAlreadyUsedError as e:
+            print(f"refused: {e}", file=sys.stderr)
+            return 2
+        print((out["output_dir"] / "test_report.md").read_text())
+        print(f"Test evaluation written to {out['output_dir']}")
+    elif args.command == "diagnose":
+        from .diagnostics import run_diagnostics
+        from .modeling import TrainConfig
+        out = run_diagnostics(paths, TrainConfig(seed=args.seed, n_iter=args.n_iter), run_id=args.run)
+        print((out["dir"] / "diagnostics.md").read_text())
+        print(f"Diagnostics written to {out['dir']}")
+    elif args.command == "compare":
+        import json
+        from .evaluation import compare_runs
+        print(json.dumps(compare_runs(paths, args.champion, args.challenger), indent=2, default=str))
     return 0
 
 

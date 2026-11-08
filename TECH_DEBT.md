@@ -8,7 +8,7 @@ Planned cleanup: after the MLA-C02 Domain 1–4 study block, as a separate bug-f
 |---|---|---|---|
 | TD-1 | Open (re-confirmed 2026-11-05) | Medium | No |
 | TD-2 | Open (re-confirmed 2026-11-05) | Low | No |
-| TD-3 | Open (recorded 2026-11-06) | Medium | No. Address before comparing Phase 3 models across re-runs |
+| TD-3 | Open (recorded 2026-11-06; Phase 3 mitigation 2026-11-08) | Medium | No. Phase 3 refuses cross-split comparisons; see note |
 | TD-4 | Open (recorded 2026-11-06) | Low | No |
 | TD-5 | Open (recorded 2026-11-06) | Medium | No for Phase 2–3. Must be addressed before any Phase 4 inference/serving |
 
@@ -66,6 +66,17 @@ Planned cleanup: after the MLA-C02 Domain 1–4 study block, as a separate bug-f
   1. Re-running on identical input reports zero moved customers.
   2. Re-running after removing one customer reports the removed customer and the number of moved customers, instead of silently overwriting.
   3. Existing `test_split_is_reproducible_and_independent_of_row_order` still passes.
+- **Phase 3 mitigation (2026-11-08, decision D7; this is not a fix):**
+  - Every Phase 3 run manifest records `split_content_sha256`, a hash of the sorted `(customer_id, split)` pairs. Unlike the file checksum, this content hash doesn't depend on Parquet byte layout.
+  - `train` refuses to run if `customer_master.parquet` no longer matches `feature_report.json` `input_sha256`, or if the assignment IDs don't match the master one-to-one.
+  - `evaluate` refuses if the current split hash differs from the hash the run was trained on.
+  - `compare` refuses two runs whose split hashes differ.
+  - Tests: `test_training_refuses_a_master_that_phase2_did_not_build_from` and `test_compare_refuses_runs_made_on_different_splits`.
+- **Remaining risk:**
+  - `run_features()` still overwrites `split_assignments.parquet` silently, and the previous assignment list is still lost.
+  - Phase 3 only *detects* the change afterwards. Old runs then become unusable for comparison; nothing preserves the old split or reports which customers moved.
+  - A split change between `train` and `evaluate` is caught. A split change that happens before any run exists can't be detected.
+- **Evidence required to close:** the three regression tests listed above, implemented against `run_features()` itself and failing on the current code, plus the chosen policy (move report, keep history, or frozen assignments).
 
 ## TD-4: Feature artifacts are overwritten one file at a time (not atomic as a set)
 
@@ -114,6 +125,11 @@ Planned cleanup: after the MLA-C02 Domain 1–4 study block, as a separate bug-f
 - **Required regression tests:**
   1. Each of the three scenarios above raises (or reports, for unknown categories, per the chosen policy) through the inference function.
   2. For valid rows, the inference function's output equals the corresponding rows of `train` / `validation` / `test.parquet` exactly.
+- **Phase 3 note (2026-11-08):**
+  - `data/processed/models/<run_id>/model.joblib` is a full `Pipeline` (or `VotingClassifier` of Pipelines). It wraps the same `ColumnTransformer`, so it **inherits this gap**: `model.predict_proba(df)` applies none of `check_input()`'s guards.
+  - Phase 3 has no inference entry point. `train`, `evaluate` and `compare` only score rows that went through `load_verified_inputs()` (`check_input()` + `_to_model_frame()`).
+  - Two small additions: `evaluate` refuses to unpickle a model if the installed scikit-learn version differs from the one recorded in the run manifest, and `diagnostics.drift_experiment` *demonstrates* the unseen-category case (20% `payment_method = "Crypto wallet"`). Feature PSI flags it (1.62), the champion's score distribution barely moves (score PSI 0.002), and no error is raised.
+  - TD-5 stays Open and still blocks Phase 4.
 
 ---
 

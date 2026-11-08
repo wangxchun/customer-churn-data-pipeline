@@ -2,7 +2,7 @@
 
 A small, local, reproducible pipeline that collects, validates, merges, and stores data for a customer-churn classification task. I built it as a learning project for **AWS Certified Machine Learning Engineer – Associate (MLA-C02), Domain 1, Task 1.1 "Collect and store data"**. It uses no AWS or other paid services.
 
-Phase 1 covers ingestion and storage. Phase 2 covers transformation and feature engineering: missing values, encoding, scaling, a reproducible split, and leakage prevention (see [Phase 2](#phase-2-features-and-leakage-prevention)). Roadmap: Phase 1 data ingestion and storage; Phase 2 data preparation; Phase 3 ML and AI model development; Phase 4 deployment, orchestration, monitoring, and maintenance. Phases 3 and 4 haven't been implemented, and no model has been trained yet. Known open bugs are tracked in [`TECH_DEBT.md`](TECH_DEBT.md).
+Phase 1 covers ingestion and storage. Phase 2 covers transformation and feature engineering: missing values, encoding, scaling, a reproducible split, and leakage prevention (see [Phase 2](#phase-2-features-and-leakage-prevention)). Phase 3 covers model development: leakage-safe cross-validation, hyperparameter search, model selection with uncertainty, a cost-based threshold, a one-time test evaluation, explanations, subgroup metrics, and drift baselines (see [Phase 3](#phase-3-model-development)). Roadmap: Phase 1 data ingestion and storage; Phase 2 data preparation; Phase 3 ML and AI model development; Phase 4 deployment, orchestration, monitoring, and maintenance. Phase 4 hasn't been implemented. Domain 1–2 skill coverage is tracked in [`MLA_C02_COVERAGE.md`](MLA_C02_COVERAGE.md). Known open bugs are tracked in [`TECH_DEBT.md`](TECH_DEBT.md).
 
 ---
 
@@ -21,6 +21,9 @@ churn-pipeline download                # fetch IBM CSV, verify SHA-256
 churn-pipeline generate-synthetic      # write synthetic Sources B and C
 churn-pipeline run                     # validate → store → ingest events → merge → summarise
 churn-pipeline build-features          # Phase 2: split, fit preprocessing on train only, write features
+churn-pipeline train                   # Phase 3: tune, select, threshold (train/validation only)
+churn-pipeline diagnose --run <run_id> # Phase 3: learning diagnostics (never affects selection)
+churn-pipeline evaluate --run <run_id> # Phase 3: the one-time test-set evaluation
 pytest                                 # run the tests
 ```
 
@@ -98,6 +101,10 @@ churn.db ──SQL aggregate──► join ────────────�
 | `events.py` | Idempotent incremental event ingestion |
 | `merge.py` | Customer master table and join diagnostics |
 | `summary.py`, `pipeline.py`, `cli.py` | Reporting, orchestration, command-line interface |
+| `modeling.py` (Phase 3) | Candidates, leakage-safe `Pipeline`, random search, selection rule, threshold, training run |
+| `evaluation.py` (Phase 3) | Metrics, bootstrap CIs, calibration, subgroup metrics, explanations, PSI; the only reader of the test split |
+| `diagnostics.py` (Phase 3) | Learning curves, convergence, epochs/batch size, early stopping, HPO budget, sensitive-feature and drift experiments |
+| `tracking.py` (Phase 3) | Input hash checks, split content hash, MLflow-shaped JSON manifest, atomic run directories |
 
 ### Results of a full run
 
@@ -247,10 +254,46 @@ Result on the real data: 4,929 / 1,057 / 1,057 rows, churn rate 26.54% / 26.58% 
 
 **What this split does not show.** The IBM data has no snapshot date and no churn date, so the split is random, not temporal. It estimates performance on unseen customers from the same snapshot. It says nothing about how a model would do on a future period. Event features stay excluded until a cutoff date can be defined.
 
+## Phase 3: model development
+
+Phase 3 reads the raw `customer_master.parquet` plus Phase 2's `split_assignments.parquet`, not the transformed `train.parquet`. Every model is `Pipeline([("pre", build_preprocessor()), ("clf", ...)])`, so the scaler and encoder are re-fitted inside every cross-validation fold. A runtime check confirms that the champion's fitted preprocessor reproduces `train.parquet` exactly (rtol = 0).
+
+| Split | Used for |
+|---|---|
+| train (4,929) | Random search per model family; 5-fold stratified CV, the same folds for every candidate |
+| validation (1,057) | Cross-family selection, threshold, calibration check, explanations, subgroup metrics |
+| test (1,057) | Only `churn-pipeline evaluate`. A second read is refused unless `--force`, and every read is logged in `test_access.json` |
+
+Design choices (approved as D1–D7; reasoning in `docs/PHASE3_DESIGN_REVIEW_ZH-TW.md`):
+
+- **Candidates:** a prior-only dummy, logistic regression, random forest, `HistGradientBoostingClassifier` (used instead of XGBoost, which isn't installed), and a soft-voting LR + HGB ensemble. No new dependencies.
+- **Selection:** the highest validation PR AUC is the reference. Any candidate whose paired-bootstrap 95% CI of the gap includes 0 counts as "within noise", and the simplest of those wins.
+- **Threshold:** the threshold minimises `5·FN + 1·FP` on validation and is then fixed. **The 5:1 ratio is an illustrative assumption, not a measured business cost** (`--fn-cost`, `--fp-cost`).
+- **Tracking:** a local JSON manifest shaped like MLflow params, metrics, tags and artifacts, plus input and split hashes, git state and package versions. MLflow isn't used.
+- **Explanations:** LR coefficients with an exact per-customer logit decomposition, and permutation importance on validation. SHAP isn't used.
+
+Outputs go to `data/processed/models/<run_id>/`. Each run directory is written to a temp directory and renamed only when complete. It contains `model.joblib`, `cv_results.csv`, `selection.json`, `validation_metrics.json`, `validation_predictions.parquet`, `explanations.json`, `baseline.json`, `manifest.json` and `report.md`. `evaluate` adds `evaluation-NN/`. `compare --champion <id> --challenger <id>` replays two runs on the validation set and refuses runs whose split hashes differ.
+
+Results on the real data (seed 42, 20 trials per family, 2026-11-08):
+
+| | Validation PR AUC [95% CI] | Validation ROC AUC |
+|---|---|---|
+| Dummy (prior) | 0.266 [0.240, 0.293] | 0.500 |
+| Logistic regression | 0.645 [0.586, 0.705] | 0.839 |
+| **Random forest (champion)** | **0.680 [0.625, 0.735]** | 0.848 |
+| Gradient boosting (HGB) | 0.657 [0.600, 0.719] | 0.844 |
+| LR + HGB soft voting | 0.656 [0.598, 0.715] | 0.844 |
+
+- **Test (read once):** PR AUC 0.660 [0.608, 0.714] and ROC AUC 0.837 [0.812, 0.862]. At the fixed threshold 0.202, recall is 0.850 and precision 0.468.
+- **What these numbers do not show:**
+  - The random forest's lead over LR is significant on validation (gap 0.034, CI [0.008, 0.060]), but not robust. With search seed 7, the rule picks LR, because the random forest's validation score drops to 0.664 and LR falls within noise.
+  - The split is random, not temporal, so these numbers don't estimate performance on future customers.
+  - The test set is small (280 churners), so its CIs are wide.
+
 ## Tests
 
 ```bash
 pytest -v
 ```
 
-The tests use small handcrafted fixtures and don't need the download. They cover normal operation, malformed CSV, JSON, and JSONL, missing columns, duplicate and conflicting events, crash rollback, unmatched IDs, join multiplication, and idempotent re-runs. `tests/test_real_dataset.py` also checks the real file's checksum, row count, and the quirk above; it is skipped if the file hasn't been downloaded.
+The tests use small handcrafted fixtures and don't need the download. They cover normal operation, malformed CSV, JSON, and JSONL, missing columns, duplicate and conflicting events, crash rollback, unmatched IDs, join multiplication, and idempotent re-runs. `tests/test_real_dataset.py` also checks the real file's checksum, row count, and the quirk above; it is skipped if the file hasn't been downloaded. Phase 3 tests (`test_modeling.py`, `test_evaluation.py`, `test_diagnostics.py`) use a small synthetic master with a churn signal. They cover test-set isolation (scrambling test rows changes nothing; a spy model never sees a test customer), per-fold preprocessing, agreement with `train.parquet`, stale-input refusal, the selection rule, determinism, atomic run directories, and the one-time test lock.
