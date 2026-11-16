@@ -27,3 +27,6 @@ where = ["src"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-ra"
+markers = [
+    "real_data: reads the real downloaded or processed data; excluded from the default CI (scripts/ci_check.sh) and run only with separate authorisation",
+]

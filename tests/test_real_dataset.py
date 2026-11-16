@@ -6,10 +6,11 @@ from churn_pipeline.download import verify_ibm_csv
 from churn_pipeline.sources import load_customers
 from churn_pipeline.synthetic import generate_event_batches, generate_profiles
 
-pytestmark = pytest.mark.skipif(
-    not DEFAULT_PATHS.ibm_csv.exists(),
-    reason="real dataset not downloaded (run `churn-pipeline download`)",
-)
+pytestmark = [
+    pytest.mark.real_data,
+    pytest.mark.skipif(not DEFAULT_PATHS.ibm_csv.exists(),
+                       reason="real dataset not downloaded (run `churn-pipeline download`)"),
+]
 
 
 def test_checksum_and_size():

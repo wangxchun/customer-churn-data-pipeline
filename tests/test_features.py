@@ -278,6 +278,7 @@ def test_run_features_requires_phase1_output(tmp_path):
 REAL_MASTER = DEFAULT_PATHS.curated / "customer_master.parquet"
 
 
+@pytest.mark.real_data
 @pytest.mark.skipif(not REAL_MASTER.exists(), reason="Phase 1 output not built")
 def test_real_master_feature_build():
     r = build_features(pd.read_parquet(REAL_MASTER))

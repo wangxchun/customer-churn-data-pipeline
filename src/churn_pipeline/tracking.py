@@ -140,17 +140,29 @@ def new_run_id() -> str:
 
 
 @contextmanager
-def atomic_directory(final: Path) -> Iterator[Path]:
+def atomic_directory(final: Path, mode: int | None = None) -> Iterator[Path]:
     """Yield a temporary sibling directory; rename it to ``final`` only on success.
 
     A failure part-way leaves no ``final`` directory and removes the temp one, so
     readers never see a half-written set of artifacts (contrast TD-4 in Phase 2).
+
+    ``mode`` (W5): if given, the temp directory is created with it (the umask can only
+    remove bits, so it is never looser), then set to exactly ``mode``; the rename keeps
+    it. ``None`` keeps the old umask-dependent behaviour for every other caller.
     """
     if final.exists():
         raise FileExistsError(f"{final} already exists")
     final.parent.mkdir(parents=True, exist_ok=True)
     tmp = final.parent / f".tmp-{final.name}-{uuid.uuid4().hex[:8]}"
-    tmp.mkdir()
+    if mode is None:
+        tmp.mkdir()
+    else:
+        tmp.mkdir(mode=mode)
+        try:
+            os.chmod(tmp, mode)                  # exact, independent of the umask
+        except BaseException:
+            shutil.rmtree(tmp, ignore_errors=True)
+            raise
     try:
         yield tmp
     except BaseException:
@@ -180,8 +192,21 @@ def _jsonable(obj):
     return obj
 
 
-def write_json(path: Path, obj) -> None:
-    path.write_text(json.dumps(_jsonable(obj), indent=2, ensure_ascii=False))
+def write_json(path: Path, obj, mode: int | None = None) -> None:
+    """``mode`` (W5): if given, the file must not exist yet (O_EXCL, never overwritten);
+    it is created with ``mode`` and then set to exactly ``mode``. The bytes written are
+    the same as without ``mode``."""
+    text = json.dumps(_jsonable(obj), indent=2, ensure_ascii=False)
+    if mode is None:
+        path.write_text(text)
+        return
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, mode)
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        if hasattr(os, "fchmod"):              # not on Windows before Python 3.13
+            os.fchmod(f.fileno(), mode)          # exact, independent of the umask
+        else:
+            os.chmod(path, mode)
+        f.write(text)
 
 
 def write_json_atomic(path: Path, obj) -> None:

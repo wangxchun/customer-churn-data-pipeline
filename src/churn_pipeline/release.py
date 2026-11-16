@@ -35,6 +35,7 @@ import hmac
 import json
 import os
 import re
+import stat
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -564,6 +565,25 @@ def _make_waiver(reason: str, approved_on: str, recorded_at: str,
             "text_status": f"approved by PM on {approved_on}"}
 
 
+# W5 (plan 6.5): a new release directory is owner-only (0700) and every file in it 0600.
+# Applies to directories created by create_release from now on; existing releases, the
+# registry's production pointer and audit log are not changed. Not enforced on Windows,
+# where POSIX mode bits do not apply.
+RELEASE_DIR_MODE = 0o700
+RELEASE_FILE_MODE = 0o600
+
+
+def _check_private_tree(d: Path) -> None:
+    if os.name == "nt":
+        return
+    bad = [p.name for p in [d, *d.iterdir()]
+           if stat.S_IMODE(p.lstat().st_mode) != (RELEASE_DIR_MODE if p == d
+                                                  else RELEASE_FILE_MODE)
+           or (p != d and not p.is_file())]
+    if bad:
+        raise ReleaseError(f"release permissions are not owner-only for: {', '.join(bad)}")
+
+
 def _write_private_json(path: Path, obj) -> None:
     fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     with os.fdopen(fd, "w", encoding="utf-8") as f:
@@ -622,7 +642,7 @@ def create_release(paths: Paths, run_id: str, key: bytes, *, waiver_reason: str 
         }
         del holdout_ids  # plaintext IDs are not kept beyond this point
         params = run_manifest.get("params") or {}
-        with atomic_directory(final) as tmp:
+        with atomic_directory(final, mode=RELEASE_DIR_MODE) as tmp:
             _write_private_json(tmp / GUARD_FILE, guard)
             manifest = {
                 "release_schema_version": RELEASE_SCHEMA_VERSION,
@@ -661,7 +681,8 @@ def create_release(paths: Paths, run_id: str, key: bytes, *, waiver_reason: str 
             gates["G9"] = {"status": "pass", "detail": "guard verified and bound to model and split"}
             gates.update(run_canary(loaded, latency_budget_s))
             manifest["gates"] = {g: gates[g] for g in RELEASE_GATES}
-            write_json(tmp / RELEASE_FILE, manifest)
+            write_json(tmp / RELEASE_FILE, manifest, mode=RELEASE_FILE_MODE)
+            _check_private_tree(tmp)             # before the rename: never publish it looser
     except GateFailedError as e:
         _audit(paths, "gate_failed", stage="release", gate=e.gate, reason=e.reason,
                run_id=run_id, release_id=release_id)

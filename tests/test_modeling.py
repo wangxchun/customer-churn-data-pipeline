@@ -169,6 +169,7 @@ def test_fitted_preprocessor_reproduces_phase2_train_parquet(tmp_path):
     assert verify_phase2_consistency(pipe, data.X_train, paths)["status"] == "identical"
 
 
+@pytest.mark.real_data
 @pytest.mark.skipif(not (DEFAULT_PATHS.features / "train.parquet").exists(),
                     reason="real Phase 2 outputs not built")
 def test_real_data_preprocessor_reproduces_train_parquet_exactly():

@@ -24,6 +24,7 @@ This register tracks, skill by skill, what this local learning project actually 
     - The stage C acceptance batch `20261116T161427Z-3c5357` was predicted and monitored.
   - W4, commit `4287613`: the restricted run passed, 555 passed, 2 deselected (78 of them in `test_cost.py` and `test_benchmark.py`). The benchmark ran on two **synthetic** releases (LR, RF) in a temporary directory; no real release and no real data were used.
   - W6, commit `4324cd3`: the restricted run passed, 609 passed, 2 deselected (54 of them in `test_ab.py`). `test_ab.py` uses synthetic IDs only. There was no real-data run, and none is needed: `ab.py` reads no data.
+  - W5 (uncommitted at the time of writing): `scripts/ci_check.sh` ran for real and exited 0: compileall passed, the secret scan had 0 findings in 62 files, and pytest gave 670 passed, 5 deselected (`-m "not real_data"`). It read no real data and checked no real release. Release permissions (0700/0600) were tested on synthetic releases only; the existing real release was not changed.
 
 ## Status codes
 
@@ -217,9 +218,9 @@ Real-data runs (all 2026-11-16):
 | Skill | Official text | Concept | Implementation | Evidence | Limitations | Next step | MP |
 |---|---|---|---|---|---|---|---|
 | 3.3.1 | Implement automated deployment strategies and rollback actions. | — | **S** | `release.py`: gates G1–G5, G7–G9 (G6 removed by decision W1-Q2), atomic `promote` with a post-deploy canary and automatic pointer restore, and `rollback`. Tests: `test_release.py`. **Real data: B2** (release created, check-release and promote passed) | A local pointer, not a deployment; real `rollback` not exercised (no previous release); canary/blue-green traffic shifting not implemented | Guide: SageMaker deployment guardrails, blue/green, canary | — |
-| 3.3.2 | Configure and troubleshoot AWS CodeBuild, AWS CodeCommit, AWS CodeDeploy, AWS CodePipeline, and AWS CodeConnections. | — | **—** | — | No AWS CI/CD services | Guide (planned C) | — |
+| 3.3.2 | Configure and troubleshoot AWS CodeBuild, AWS CodeCommit, AWS CodeDeploy, AWS CodePipeline, and AWS CodeConnections. | ✅ P4 W5 §5 | **C** | Guide maps each `ci_check.sh` step to a CodePipeline stage and a CodeBuild buildspec phase | No AWS CI/CD service used or configured | — | — |
 | 3.3.3 | Configure training and inference jobs. | — | **P** | Training: Phase 3 `churn-pipeline train`. Batch inference job: `predict` (**real data: Stage C**) | Local jobs only; SageMaker training/processing/batch-transform job configuration not covered | Guide (C part) | — |
-| 3.3.4 | Configure automated testing strategies within CI/CD pipelines for traditional ML and AI workloads. | — | **—** | A pytest suite exists (restricted run 477 passed), but there is no CI pipeline | No CI script yet | W5 `scripts/ci_check.sh` (planned I, local) | — |
+| 3.3.4 | Configure automated testing strategies within CI/CD pipelines for traditional ML and AI workloads. | ✅ P4 W5 §1–3 | **I** (local) | `scripts/ci_check.sh`: compileall → secret scan → pytest `-m "not real_data" --strict-markers`, stopping at the first failure (exit 0/1/2). The `real_data` marker excludes exactly the 5 real-data tests, which `test_repo_hygiene.py` checks by collection. Orchestration tested with a stub interpreter (`test_ci_check.py`). Real run: 670 passed, 5 deselected | Local script, not a hosted pipeline; no trigger on push; real-data and real-release checks are separate manual steps (R1, R2); no lint or type checking (D8-Q1) | — | — |
 | 3.3.5 | Build and integrate mechanisms to re-train models. | — | **P** | W3 alerts set `retrain_review_recommended` (`monitoring.batch_record`). Tests prove that no training code is ever called (`test_monitoring.py`) | Retraining is deliberately manual; no trigger, pipeline or schedule | Guide: retraining triggers and pipelines (C) | — |
 | 3.3.6 | Manage model versions for repeatability and audits (for example, SageMaker Model Registry, MLflow on SageMaker AI). | — | **I** (local) | Phase 3 run manifests (`tracking.py`); W1 immutable releases, `production.json` pointer, append-only `audit_log.jsonl`, D6 waiver. **Real data: B2** | MLflow-shaped JSON, not MLflow; no SageMaker Model Registry; manifests unsigned | Guide (C part) | — |
 | 3.3.7 | Manage prompts (for example, Amazon Bedrock Prompt Management). | — | **M** | — | | M1 | M1 |
@@ -232,13 +233,13 @@ Real-data runs (all 2026-11-16):
 
 | Code | Skills |
 |---|---|
-| I (local) | 3.3.6 |
+| I (local) | 3.3.4, 3.3.6 |
 | I + S | 3.1.3 |
 | S | 3.3.1 |
 | P | 3.3.3, 3.3.5 |
 | C + S | 3.2.1, 3.2.6 |
-| C | 3.1.1 |
-| — (planned; not done) | 3.1.2, 3.1.5, 3.2.2, 3.2.3, 3.2.4, 3.2.5, 3.2.10, 3.3.2, 3.3.4 |
+| C | 3.1.1, 3.3.2 |
+| — (planned; not done) | 3.1.2, 3.1.5, 3.2.2, 3.2.3, 3.2.4, 3.2.5, 3.2.10 |
 | M | 3.1.4, 3.1.7, 3.1.8, 3.2.7, 3.2.8, 3.3.7, 3.3.9, 3.3.10, 3.3.11 |
 | X | 3.1.6, 3.2.9, 3.2.11, 3.3.8 |
 
@@ -278,13 +279,13 @@ The columns and conventions are the same as in Domain 3.
 
 | Skill | Official text | Concept | Implementation | Evidence | Limitations | Next step | MP |
 |---|---|---|---|---|---|---|---|
-| 4.3.1 | Secure continuous integration and continuous delivery (CI/CD) pipelines by checking for code and image vulnerabilities (for example, by using Amazon CodeGuru, Amazon Inspector). | — | **—** | — | No CI and no secret scan yet; no dependency scan by decision (D9) | W5 secret-pattern scan of tracked files (planned P) + guide (CodeGuru, Inspector C) | — |
-| 4.3.2 | Configure least privilege access to ML and AI artifacts. | — | **P** | Holdout guard file written with mode 0600 (`release._write_private_json`, tested in `test_release.py`); guard key file must be owner-only | Other release files are 0644; no IAM | W5 0700/0600 release dirs (planned S) + guide | — |
+| 4.3.1 | Secure continuous integration and continuous delivery (CI/CD) pipelines by checking for code and image vulnerabilities (for example, by using Amazon CodeGuru, Amazon Inspector). | ✅ P4 W5 §4–5 | **P** | Secret scan as a CI step (`scripts/secret_scan.py`, stdlib regex for 11 credential formats, tracked plus untracked-not-ignored files, values never printed); tests with runtime-built fake credentials (`test_secret_scan.py`); the repo itself scans clean (`test_repo_hygiene.py`). CodeGuru and Inspector are conceptual only (guide) | Regex scan of known formats only: no entropy detection, no git history, no ignored files; no dependency or image vulnerability scan (D9); no container image exists | — | — |
+| 4.3.2 | Configure least privilege access to ML and AI artifacts. | ✅ P4 W5 §4b | **P** | Holdout guard file 0600; guard key file must be owner-only. W5: a new release directory is created 0700 and its files 0600, set exactly whatever the umask, and checked before the atomic rename. A looser or unexpected entry blocks the release (`release.create_release`, `tracking.atomic_directory(mode=)`, `tracking.write_json(mode=)`). Tests: `test_release_permissions.py`, synthetic releases under umasks 000, 022, 027, 077 and 277; failures leave no release | Local POSIX file modes only, not IAM. Releases created before W5, including the real `rel-20261116T123424Z-d93c9b` (0755), are not changed. The production pointer, audit log and `releases/` parent keep umask defaults. Same-user processes can still read everything. Not enforced on Windows | Guide: IAM (C) | — |
 | 4.3.3 | Configure IAM policies and roles for users and applications in ML and AI systems. | — | **—** | — | No IAM locally | Guide (planned C) | — |
 | 4.3.4 | Configure comprehensive monitoring, auditing, compliance, and logging for ML and AI systems (for example, AWS CloudTrail, AWS Config). | — | **S** | Append-only `audit_log.jsonl` (release, gate failure, promote, rollback events); release manifests; monitoring JSONL. **Real data: B2, Stage C** | No CloudTrail or Config; logs are local files | Guide (C part) | — |
 | 4.3.5 | Troubleshoot and debug security issues in ML and AI systems. | — | **P** | Actionable fail-closed errors for hash, version, key, guard and baseline problems (`inference.py`, `release.py`, `monitoring.py`), with tests | No AWS access-denied, KMS or VPC troubleshooting | Guide (C part) | — |
 | 4.3.6 | Create VPCs, subnets, and security groups to securely isolate ML and AI systems. | — | **—** | — | | Guide (planned C) | — |
-| 4.3.7 | Identify and mitigate security risks and vulnerabilities in ML and AI systems. | — | **I** (local) | sha256 checked before unpickling (TD-5); input validation; HMAC holdout guard with external key (W1); no IDs or raw values in logs, records or reports (tests). **Real data: B2, Stage C** | No signing (manifest and model can be replaced together); holdout guard matches exact strings only (accepted M3) | W5 hygiene checks; guide | — |
+| 4.3.7 | Identify and mitigate security risks and vulnerabilities in ML and AI systems. | ◐ P4 W5 §4 | **I** (local) | sha256 checked before unpickling (TD-5); input validation; HMAC holdout guard with external key (W1); no IDs or raw values in logs, records or reports (tests). **Real data: B2, Stage C**. W5: secret scan in CI; tests that `data/`, `docs/` and `.venv/` stay ignored and no data file is tracked (`test_repo_hygiene.py`) | No signing (manifest and model can be replaced together); holdout guard matches exact strings only (accepted M3) | Guide: W1–W3 chapter | — |
 | 4.3.8 | Select the appropriate credential type to access FMs (for example, Amazon Bedrock API keys, IAM credentials). | — | **—** | — | | Guide (planned C) / M1 | M1 |
 | 4.3.9 | Implement safeguards and sensitive data protection to meet application requirements and responsible AI policies (for example, by using Amazon Bedrock Guardrails). | — | **P** | Customer IDs and raw feature values excluded from monitoring records and reports (tests); holdout IDs stored only as HMACs; D2-Q2 counts-only drift report | Bedrock Guardrails not covered; rejects files keep `customer_id` locally by decision (D3) | Guardrails → M1 | M1 |
 
@@ -295,11 +296,11 @@ The columns and conventions are the same as in Domain 3.
 | I (local) | 4.1.2, 4.3.7 |
 | I + S | 4.1.3 |
 | S | 4.2.3, 4.3.4 |
-| P | 4.1.1, 4.2.2, 4.3.2, 4.3.5, 4.3.9 |
+| P | 4.1.1, 4.2.2, 4.3.1, 4.3.2, 4.3.5, 4.3.9 |
 | C + I | 4.1.4 |
 | C + S | 4.2.4 |
 | C | 4.2.1, 4.2.6 |
-| — (planned; not done) | 4.2.5, 4.3.1, 4.3.3, 4.3.6, 4.3.8 |
+| — (planned; not done) | 4.2.5, 4.3.3, 4.3.6, 4.3.8 |
 | M | 4.1.6, 4.2.7, 4.2.9, 4.2.10 |
 | X | 4.1.5, 4.2.8 |
 
