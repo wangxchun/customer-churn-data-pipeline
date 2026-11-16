@@ -2,7 +2,7 @@
 
 A small, local, reproducible pipeline that collects, validates, merges, and stores data for a customer-churn classification task. I built it as a learning project for **AWS Certified Machine Learning Engineer – Associate (MLA-C02), Domain 1, Task 1.1 "Collect and store data"**. It uses no AWS or other paid services.
 
-Phase 1 covers ingestion and storage. Phase 2 covers transformation and feature engineering: missing values, encoding, scaling, a reproducible split, and leakage prevention (see [Phase 2](#phase-2-features-and-leakage-prevention)). Phase 3 covers model development: leakage-safe cross-validation, hyperparameter search, model selection with uncertainty, a cost-based threshold, a one-time test evaluation, explanations, subgroup metrics, and drift baselines (see [Phase 3](#phase-3-model-development)). Roadmap: Phase 1 data ingestion and storage; Phase 2 data preparation; Phase 3 ML and AI model development; Phase 4 deployment, orchestration, monitoring, and maintenance. Phase 4 hasn't been implemented. Domain 1–2 skill coverage is tracked in [`MLA_C02_COVERAGE.md`](MLA_C02_COVERAGE.md). Known open bugs are tracked in [`TECH_DEBT.md`](TECH_DEBT.md).
+Phase 1 covers ingestion and storage. Phase 2 covers transformation and feature engineering: missing values, encoding, scaling, a reproducible split, and leakage prevention (see [Phase 2](#phase-2-features-and-leakage-prevention)). Phase 3 covers model development: leakage-safe cross-validation, hyperparameter search, model selection with uncertainty, a cost-based threshold, a one-time test evaluation, explanations, subgroup metrics, and drift baselines (see [Phase 3](#phase-3-model-development)). Roadmap: Phase 1 data ingestion and storage; Phase 2 data preparation; Phase 3 ML and AI model development; Phase 4 deployment, orchestration, monitoring, and maintenance. Phase 4 is partly implemented, locally only. Done: guarded inference, a release registry with a holdout guard, synthetic traffic, batch predict and monitoring (see [Phase 4](#phase-4-local-deployment-and-monitoring-partial)). Not done yet: benchmark and cost (W4), a CI script (W5) and A/B tooling (W6). Domain 1–4 skill coverage is tracked in [`MLA_C02_COVERAGE.md`](MLA_C02_COVERAGE.md). Known open bugs are tracked in [`TECH_DEBT.md`](TECH_DEBT.md).
 
 ---
 
@@ -290,6 +290,49 @@ Results on the real data (seed 42, 20 trials per family, 2026-11-08):
   - The split is random, not temporal, so these numbers don't estimate performance on future customers.
   - The test set is small (280 churners), so its CIs are wide.
 
+## Phase 4: local deployment and monitoring (partial)
+
+Everything here runs locally. There is no AWS deployment, and the AWS services named in [`MLA_C02_COVERAGE.md`](MLA_C02_COVERAGE.md) are conceptual only.
+
+| Work item | What it does | Code |
+|---|---|---|
+| TD-5 | Guarded inference: hashes and versions are verified before unpickling; Phase 1 input rules are applied; unseen categories are rejected rather than encoded as zeros | `inference.py` |
+| W1 | Release registry: immutable releases with gates, an HMAC holdout guard (the key lives outside the repo, in `CHURN_HOLDOUT_GUARD_KEY_FILE`), `promote` with a post-deploy canary and automatic restore, `rollback`, and an append-only audit log | `release.py` |
+| D7 | Synthetic inference traffic resampled from train rows, with an ID suffix certified against the real IDs | `traffic.py`, `simulate.py` |
+| W2 | Batch predict: the holdout guard first, then TD-5 validation and scoring; `predictions.parquet`, `rejects.parquet` and `batch_manifest.json` are written atomically | `predict.py` |
+| W3 | Monitoring: one aggregate-only record per batch, with null and reject rates, unseen share, feature PSI and score PSI. Alerts only recommend a human review; nothing is retrained | `monitoring.py` |
+
+```bash
+churn-pipeline release --run <run_id> [--waive-dirty-code REASON --waiver-approved-on YYYY-MM-DD]
+churn-pipeline check-release --release <release_id>
+churn-pipeline promote --release <release_id>
+churn-pipeline simulate-traffic --data-dir DIR --suffix SYNTR --expected-count N --scenario none --n 1000 --seed 42 --out-dir DIR --name NAME
+churn-pipeline predict --data-dir DIR --input batch.parquet [--release production]
+churn-pipeline monitor-report --data-dir DIR --release <release_id>
+```
+
+**Exit codes:**
+- `predict` returns 0 on success and 2 when it refuses (nothing is written). It returns 3 when the batch was written but its monitoring record was not.
+- The other commands return 2 when they refuse.
+
+`simulate-traffic`, `predict` and `monitor-report` require an explicit `--data-dir`.
+
+**Acceptance on the real data (2026-11-16, commit `ac450e0`):**
+- Release `rel-20261116T123424Z-d93c9b` was promoted.
+- Batch `20261116T161427Z-3c5357` scored 1000 of 1000 synthetic-ID rows, with 0 rejects and no holdout hits.
+- Max feature PSI was 0.0105 and score PSI 0.027; no alerts.
+
+**What these numbers do not show:**
+- **There are no labels**, so production performance is not monitored, only input and score distributions.
+- **Score PSI is a limited signal.** Its baseline is validation scores, but the synthetic traffic is resampled from train rows, so it must not be read on its own as drift or as degradation.
+- **Untested on real data.** Drift alerts were shown only on synthetic scenarios, and rollback has not been exercised on real data.
+
+**Remaining work:**
+- W4: benchmark and `cost.py`.
+- W5: `scripts/ci_check.sh` and a secret scan.
+- W6: `ab.py`.
+- Conceptual guides, and the D14/D15 notes on the SageMaker serving contract and containers.
+
 ## Tests
 
 ```bash
@@ -297,3 +340,15 @@ pytest -v
 ```
 
 The tests use small handcrafted fixtures and don't need the download. They cover normal operation, malformed CSV, JSON, and JSONL, missing columns, duplicate and conflicting events, crash rollback, unmatched IDs, join multiplication, and idempotent re-runs. `tests/test_real_dataset.py` also checks the real file's checksum, row count, and the quirk above; it is skipped if the file hasn't been downloaded. Phase 3 tests (`test_modeling.py`, `test_evaluation.py`, `test_diagnostics.py`) use a small synthetic master with a churn signal. They cover test-set isolation (scrambling test rows changes nothing; a spy model never sees a test customer), per-fold preprocessing, agreement with `train.parquet`, stale-input refusal, the selection rule, determinism, atomic run directories, and the one-time test lock.
+
+Phase 4 tests (`test_inference.py`, `test_split_drift.py`, `test_release.py`, `test_traffic.py`, `test_simulate.py`, `test_predict.py` and `test_monitoring.py`) use synthetic fixtures and temporary directories only.
+
+Three tests read the real data when it is present: `test_features.py::test_real_master_feature_build`, `test_modeling.py::test_real_data_preprocessor_reproduces_train_parquet_exactly`, and `test_real_dataset.py`. To run everything else without touching real data:
+
+```bash
+pytest -q --deselect tests/test_features.py::test_real_master_feature_build \
+  --deselect tests/test_modeling.py::test_real_data_preprocessor_reproduces_train_parquet_exactly \
+  --ignore tests/test_real_dataset.py
+```
+
+On 2026-11-16, at commit `ac450e0`, this gave 477 passed and 2 deselected.
