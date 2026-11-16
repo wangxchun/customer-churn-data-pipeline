@@ -15,6 +15,7 @@ This register tracks, skill by skill, what this local learning project actually 
   - Diagnostics `20261108T104524Z-908690`, and test evaluation `evaluation-01` of the seed-42 run.
 
   All run outputs live under `data/processed/models/`, which git ignores.
+- **Phase 4 status (closed 2026-11-16):** W1–W6, TD-3 and TD-5 are implemented locally, and the D14/D15 and pure-concept guide chapters are written. The final round changed documentation only. **No tests were re-run for it**: the latest test evidence is the W5 CI run at commit `521089e` (671 passed, 5 deselected). See [Phase 4 final status](#phase-4-final-status) for the four-way split.
 - **Phase 4 verification:** 2026-11-16. That day's checks:
   - Commit `ac450e0`.
   - The restricted `pytest` run passed: 477 passed, 2 deselected. It excludes the real-data tests `test_features.py::test_real_master_feature_build` and `test_modeling.py::test_real_data_preprocessor_reproduces_train_parquet_exactly`, and ignores `test_real_dataset.py`.
@@ -37,6 +38,8 @@ This register tracks, skill by skill, what this local learning project actually 
 | **M** | Deferred to a mini-project: M1 = local RAG + GenAI evaluation; M2 = small-FM LoRA fine-tuning |
 | **X** | Out of scope for this project by decision (Phase 4 A1: agent skills; no fake agent is built). Neither concept coverage nor implementation |
 | **—** | Not yet assessed |
+
+Concept column: ✅ = guide section written; ◐ = partly written; `concept deferred` = the guide section was not written when Phase 4 closed (the implementation status still stands); — = no concept part planned.
 
 Guide references: P1 = `docs/INTERNAL_GUIDE_ZH-TW.md`, P2 = `docs/PHASE2_GUIDE_ZH-TW.md`, P3 = `docs/PHASE3_GUIDE_ZH-TW.md` (chapter letters), P4 = `docs/PHASE4_GUIDE_ZH-TW.md` (work-item chapter and section, e.g. "P4 W4 §5"). The `docs/` folder is intentionally git-ignored (`.gitignore`), so guide references point to local files only.
 
@@ -189,10 +192,10 @@ Real-data runs (all 2026-11-16):
 | Skill | Official text | Concept | Implementation | Evidence | Limitations | Next step | MP |
 |---|---|---|---|---|---|---|---|
 | 3.1.1 | Select appropriate compute environments and deployment targets. | ✅ P4 W4 §3–4 | **C** (local evidence) | Real-time / serverless / async / batch decision matrix in the guide. W4 `benchmark` (`benchmark.py`, `test_benchmark.py`) measures guarded vs raw latency, load time and model size; **Synthetic releases only** (LR, RF; 2026-11-16), not real data | No endpoint deployed; in-process latency only; local CPU is not an AWS instance | — | — |
-| 3.1.2 | Select deployment orchestrators and multi-model or multi-container deployment strategies. | — | **—** | — | Single tabular model; no multi-model case | Guide (planned C) | — |
-| 3.1.3 | Select model inference strategies (for example, real-time and batch processing). | — | **I** (batch) **+ S** (single record) | Batch: `predict` CLI → `predict.run_predict`, `test_predict.py` (31 tests); **real data: Stage C**. Single record: `release.predict_one` / `inference.predict_one`, synthetic tests only | No real-time endpoint; single-record path is in-process, not a served endpoint | Guide: real-time vs batch vs async vs serverless | — |
+| 3.1.2 | Select deployment orchestrators and multi-model or multi-container deployment strategies. | ✅ P4 CON-1 | **C** | Guide P4 CON-1. Guide only (concept, no code) | Single tabular model; no orchestrator, MME or multi-container endpoint | — | — |
+| 3.1.3 | Select model inference strategies (for example, real-time and batch processing). | concept deferred | **I** (batch) **+ S** (single record) | Batch: `predict` CLI → `predict.run_predict`, `test_predict.py` (31 tests); **real data: Stage C**. Single record: `release.predict_one` / `inference.predict_one`, synthetic tests only | No real-time endpoint; single-record path is in-process, not a served endpoint | Concept deferred | — |
 | 3.1.4 | Evaluate and select appropriate foundation model (FM) deployment options. | — | **M** | — | No FM | M1 (+ guide C) | M1 |
-| 3.1.5 | Deploy models that were built outside of AWS into AWS environments (for example, Amazon SageMaker AI, Amazon Bedrock Custom Model Import). | — | **—** | — | `model.joblib` not packaged; no SageMaker container (D14) | D14 guide: `model_fn` contract, `model.tar.gz` (planned C) | — |
+| 3.1.5 | Deploy models that were built outside of AWS into AWS environments (for example, Amazon SageMaker AI, Amazon Bedrock Custom Model Import). | ✅ P4 D14 | **C** | Guide P4 D14-1–3: `model_fn`/`input_fn`/`predict_fn`/`output_fn`, local vs SageMaker contract, `model.tar.gz` packaging, unverified AWS assumptions. Guide only (concept, no code) | Nothing packaged or deployed; no SDK (D14); Bedrock Custom Model Import not covered | — | — |
 | 3.1.6 | Deploy and configure agents for specific tasks, integration with other services and tools, and agent communication protocols. | — | **X** | — | Out of scope (A1) | — | — |
 | 3.1.7 | Configure FM deployment, model hosting, and resource allocation. | — | **M** | — | | M2 (+ guide C) | M2 |
 | 3.1.8 | Apply Retrieval Augmented Generation (RAG) system configurations (for example, retrieval strategies, reranking). | — | **M** | — | | M1 | M1 |
@@ -202,27 +205,27 @@ Real-data runs (all 2026-11-16):
 | Skill | Official text | Concept | Implementation | Evidence | Limitations | Next step | MP |
 |---|---|---|---|---|---|---|---|
 | 3.2.1 | Optimize resource provisioning between on-demand and provisioned resources for performance and cost efficiency. | ✅ P4 W4 §2, §6 | **C + S** | `cost.py`: always-on vs serverless vs batch cost formulas and `compare` (cheapest first); hand-computed exact tests and refusal of ≤ 0 / NaN / inf / bool (`test_cost.py`) | Prices are user inputs (guide examples are made up); no AWS pricing or billing data | — | — |
-| 3.2.2 | Automate compute resource provisioning with integrated communication between stacks and orchestration services. | — | **—** | — | No IaC | Guide (planned C) | — |
-| 3.2.3 | Build and maintain containers for ML and AI workloads. | — | **—** | — | No Dockerfile by decision (D15) | D15 guide (planned C) | — |
-| 3.2.4 | Configure SageMaker AI endpoints within VPC network environments. | — | **—** | — | | Guide (planned C) | — |
-| 3.2.5 | Deploy and host models programmatically (for example, by using the SageMaker AI SDK for Python, AWS CLI, Boto3). | — | **—** | — | No AWS SDK by decision (D14) | Guide (planned C) | — |
+| 3.2.2 | Automate compute resource provisioning with integrated communication between stacks and orchestration services. | ✅ P4 CON-2 | **C** | Guide P4 CON-2. Guide only (concept, no code) | No IaC (plan §9) | — | — |
+| 3.2.3 | Build and maintain containers for ML and AI workloads. | ✅ P4 D15 | **C** | Guide P4 D15-1–2: images, Dockerfile, prebuilt vs extend vs BYOC, ECR, image maintenance. Guide only (concept, no code) | No Dockerfile and no Docker use (D15) | — | — |
+| 3.2.4 | Configure SageMaker AI endpoints within VPC network environments. | ✅ P4 CON-3 | **C** | Guide P4 CON-3. Guide only (concept, no code) | No network layer | — | — |
+| 3.2.5 | Deploy and host models programmatically (for example, by using the SageMaker AI SDK for Python, AWS CLI, Boto3). | ✅ P4 CON-4 | **C** | Guide P4 CON-4. Guide only (concept, no code) | No AWS SDK by decision (D14) | — | — |
 | 3.2.6 | Select specific metrics for auto scaling implementations. | ✅ P4 W4 §3, §7 | **C + S** | `cost.invocations_per_instance_target` turns measured single-row latency into an `InvocationsPerInstance` target; guide works it out from the W4 numbers (**Synthetic releases only** (LR, RF; 2026-11-16), not real data) | No Application Auto Scaling; target not validated by a load test | — | — |
 | 3.2.7 | Create and manage Amazon Bedrock knowledge bases with vector database configurations, document indexing, and retrieval optimization. | — | **M** | — | | M1 | M1 |
 | 3.2.8 | Implement retrieval pipelines to meet business needs. | — | **M** | — | | M1 | M1 |
 | 3.2.9 | Implement agent state management systems. | — | **X** | — | Out of scope (A1) | — | — |
-| 3.2.10 | Implement AI-specific resource scaling for GPU workloads. | — | **—** | — | No GPU workload | Guide (planned C; M2 may touch it) | — |
+| 3.2.10 | Implement AI-specific resource scaling for GPU workloads. | ✅ P4 CON-5 | **C** | Guide P4 CON-5. Guide only (concept, no code) | No GPU workload (W4 §5); M2 may touch it | — | — |
 | 3.2.11 | Deploy agentic workflow infrastructure. | — | **X** | — | Out of scope (A1) | — | — |
 
 ### Task 3.3: Implement automated orchestration and continuous integration and continuous delivery (CI/CD) pipelines for MLOps and AI workloads.
 
 | Skill | Official text | Concept | Implementation | Evidence | Limitations | Next step | MP |
 |---|---|---|---|---|---|---|---|
-| 3.3.1 | Implement automated deployment strategies and rollback actions. | — | **S** | `release.py`: gates G1–G5, G7–G9 (G6 removed by decision W1-Q2), atomic `promote` with a post-deploy canary and automatic pointer restore, and `rollback`. Tests: `test_release.py`. **Real data: B2** (release created, check-release and promote passed) | A local pointer, not a deployment; real `rollback` not exercised (no previous release); canary/blue-green traffic shifting not implemented | Guide: SageMaker deployment guardrails, blue/green, canary | — |
+| 3.3.1 | Implement automated deployment strategies and rollback actions. | concept deferred | **S** | `release.py`: gates G1–G5, G7–G9 (G6 removed by decision W1-Q2), atomic `promote` with a post-deploy canary and automatic pointer restore, and `rollback`. Tests: `test_release.py`. **Real data: B2** (release created, check-release and promote passed) | A local pointer, not a deployment; real `rollback` not exercised (no previous release); canary/blue-green traffic shifting not implemented | Concept deferred | — |
 | 3.3.2 | Configure and troubleshoot AWS CodeBuild, AWS CodeCommit, AWS CodeDeploy, AWS CodePipeline, and AWS CodeConnections. | ✅ P4 W5 §5 | **C** | Guide maps each `ci_check.sh` step to a CodePipeline stage and a CodeBuild buildspec phase | No AWS CI/CD service used or configured | — | — |
-| 3.3.3 | Configure training and inference jobs. | — | **P** | Training: Phase 3 `churn-pipeline train`. Batch inference job: `predict` (**real data: Stage C**) | Local jobs only; SageMaker training/processing/batch-transform job configuration not covered | Guide (C part) | — |
+| 3.3.3 | Configure training and inference jobs. | concept deferred | **P** | Training: Phase 3 `churn-pipeline train`. Batch inference job: `predict` (**real data: Stage C**) | Local jobs only; SageMaker training/processing/batch-transform job configuration not covered | Concept deferred | — |
 | 3.3.4 | Configure automated testing strategies within CI/CD pipelines for traditional ML and AI workloads. | ✅ P4 W5 §1–3 | **I** (local) | `scripts/ci_check.sh`: compileall → secret scan → pytest `-m "not real_data" --strict-markers`, stopping at the first failure (exit 0/1/2). The `real_data` marker excludes exactly the 5 real-data tests, which `test_repo_hygiene.py` checks by collection. Orchestration tested with a stub interpreter (`test_ci_check.py`). Real run: 671 passed, 5 deselected | Local script, not a hosted pipeline; no trigger on push; real-data and real-release checks are separate manual steps (R1, R2); no lint or type checking (D8-Q1) | — | — |
-| 3.3.5 | Build and integrate mechanisms to re-train models. | — | **P** | W3 alerts set `retrain_review_recommended` (`monitoring.batch_record`). Tests prove that no training code is ever called (`test_monitoring.py`) | Retraining is deliberately manual; no trigger, pipeline or schedule | Guide: retraining triggers and pipelines (C) | — |
-| 3.3.6 | Manage model versions for repeatability and audits (for example, SageMaker Model Registry, MLflow on SageMaker AI). | — | **I** (local) | Phase 3 run manifests (`tracking.py`); W1 immutable releases, `production.json` pointer, append-only `audit_log.jsonl`, D6 waiver. **Real data: B2** | MLflow-shaped JSON, not MLflow; no SageMaker Model Registry; manifests unsigned | Guide (C part) | — |
+| 3.3.5 | Build and integrate mechanisms to re-train models. | concept deferred | **P** | W3 alerts set `retrain_review_recommended` (`monitoring.batch_record`). Tests prove that no training code is ever called (`test_monitoring.py`) | Retraining is deliberately manual; no trigger, pipeline or schedule | Concept deferred | — |
+| 3.3.6 | Manage model versions for repeatability and audits (for example, SageMaker Model Registry, MLflow on SageMaker AI). | concept deferred | **I** (local) | Phase 3 run manifests (`tracking.py`); W1 immutable releases, `production.json` pointer, append-only `audit_log.jsonl`, D6 waiver. **Real data: B2** | MLflow-shaped JSON, not MLflow; no SageMaker Model Registry; manifests unsigned | Concept deferred | — |
 | 3.3.7 | Manage prompts (for example, Amazon Bedrock Prompt Management). | — | **M** | — | | M1 | M1 |
 | 3.3.8 | Implement automated agent deployment pipelines and agent version management. | — | **X** | — | Out of scope (A1) | — | — |
 | 3.3.9 | Implement AI model testing frameworks, including prompt testing. | — | **M** | — | ML testing part counted under 3.3.4 | M1 | M1 |
@@ -238,8 +241,7 @@ Real-data runs (all 2026-11-16):
 | S | 3.3.1 |
 | P | 3.3.3, 3.3.5 |
 | C + S | 3.2.1, 3.2.6 |
-| C | 3.1.1, 3.3.2 |
-| — (planned; not done) | 3.1.2, 3.1.5, 3.2.2, 3.2.3, 3.2.4, 3.2.5, 3.2.10 |
+| C | 3.1.1, 3.1.2, 3.1.5, 3.2.2, 3.2.3, 3.2.4, 3.2.5, 3.2.10, 3.3.2 |
 | M | 3.1.4, 3.1.7, 3.1.8, 3.2.7, 3.2.8, 3.3.7, 3.3.9, 3.3.10, 3.3.11 |
 | X | 3.1.6, 3.2.9, 3.2.11, 3.3.8 |
 
@@ -253,8 +255,8 @@ The columns and conventions are the same as in Domain 3.
 
 | Skill | Official text | Concept | Implementation | Evidence | Limitations | Next step | MP |
 |---|---|---|---|---|---|---|---|
-| 4.1.1 | Monitor model performance in production by using Amazon CloudWatch generative AI observability, Amazon Bedrock Model Evaluation, and drift detection pipelines. | — | **P** | Drift detection pipeline: `monitoring.py` (feature PSI vs train baseline, score PSI vs validation baseline), `test_monitoring.py`. **Real data: Stage C** (max feature PSI 0.0105, score PSI 0.027, no alerts) | No labels, so performance itself is not monitored; CloudWatch and Bedrock evaluation not covered; score-PSI baseline mismatch (D7 traffic from train rows vs validation score baseline) | Guide (CloudWatch C); Bedrock → M1 | M1 |
-| 4.1.2 | Monitor workflows to detect anomalies or errors in data processing or model inference. | — | **I** (local) | Reject rate, per-column null rate, unseen share and data-quality alerts in `monitoring.batch_record`; fail-closed errors and exit codes 0/2/3 in `predict`. **Real data: Stage C** | Local JSONL, not CloudWatch alarms | Guide (C part) | — |
+| 4.1.1 | Monitor model performance in production by using Amazon CloudWatch generative AI observability, Amazon Bedrock Model Evaluation, and drift detection pipelines. | concept deferred | **P** | Drift detection pipeline: `monitoring.py` (feature PSI vs train baseline, score PSI vs validation baseline), `test_monitoring.py`. **Real data: Stage C** (max feature PSI 0.0105, score PSI 0.027, no alerts) | No labels, so performance itself is not monitored; CloudWatch and Bedrock evaluation not covered; score-PSI baseline mismatch (D7 traffic from train rows vs validation score baseline) | Concept deferred; Bedrock → M1 | M1 |
+| 4.1.2 | Monitor workflows to detect anomalies or errors in data processing or model inference. | concept deferred | **I** (local) | Reject rate, per-column null rate, unseen share and data-quality alerts in `monitoring.batch_record`; fail-closed errors and exit codes 0/2/3 in `predict`. **Real data: Stage C** | Local JSONL, not CloudWatch alarms | Concept deferred | — |
 | 4.1.3 | Detect changes in data distribution that can affect model performance. | — | **I + S** | PSI with P8 thresholds (> 0.25). Scenario tests on synthetic traffic: `price_up`, `contract_mix`, `unseen_payment` and `nulls` raise the expected alerts; `none` raises none. **Real data: Stage C** (no-drift batch, no alerts) | Drift alerts are proven on synthetic shifts only; PSI ignores sample size; score PSI must not be read alone (validation baseline vs train-resampled traffic) | — | — |
 | 4.1.4 | Monitor model performance in production by using A/B testing. | ✅ P4 W6 | **C + I** (router and sample size only, D10) | `ab.assign_variant`: sha256-salted sticky assignment, verified against an independent hashlib computation, stable across `PYTHONHASHSEED`, proportions within 4 SE on 100k synthetic IDs. `ab.required_sample_size`: two-sided two-proportion z-test, matching the textbook hand example (0.20 vs 0.30 → 294 per group). Tests: `test_ab.py` (synthetic IDs only) | No online A/B test, no live traffic, no outcome collection or analysis, and no outcomes are simulated (D10); no SageMaker production variants; equal-size groups only | — | — |
 | 4.1.5 | Monitor and automate the management of agent performance and coordination (for example, coordination failure detection, truncated streaming, tool failures). | — | **X** | — | Out of scope (A1) | — | — |
@@ -265,10 +267,10 @@ The columns and conventions are the same as in Domain 3.
 | Skill | Official text | Concept | Implementation | Evidence | Limitations | Next step | MP |
 |---|---|---|---|---|---|---|---|
 | 4.2.1 | Select inference instance families to optimize performance and cost. | ✅ P4 W4 §5 | **C** (local evidence) | Guide: instance families vs this workload (small CPU tabular models). W4 benchmark gives relative evidence (LR vs RF, guarded vs raw); **Synthetic releases only** (LR, RF; 2026-11-16), not real data | Local arm64 CPU maps to no `ml.*` instance; no Inference Recommender | — | — |
-| 4.2.2 | Configure and use tools to troubleshoot and analyze resources (for example, Amazon CloudWatch, Amazon Bedrock AgentCore Observability, AWS X-Ray). | ◐ P4 W4 §8 | **P** | Coarse stage timings in `batch_manifest.json` and monitoring records (`load_release`, `read_input`, `predict_batch`, `write`). **Real data: Stage C**. W4 benchmark separates guarded from raw latency (synthetic releases only) | Validate/transform/predict are not timed separately in `predict` (accepted P5); no CloudWatch or X-Ray; AgentCore Observability not covered | Guide: W1–W3 chapter | — |
-| 4.2.3 | Set up dashboards to monitor performance metrics. | — | **S** | `monitor-report`: a static Markdown report across batches (prints only). **Real data: Stage C** | A static report, not a dashboard | Guide: CloudWatch dashboards (C) | — |
+| 4.2.2 | Configure and use tools to troubleshoot and analyze resources (for example, Amazon CloudWatch, Amazon Bedrock AgentCore Observability, AWS X-Ray). | ◐ P4 W4 §8 | **P** | Coarse stage timings in `batch_manifest.json` and monitoring records (`load_release`, `read_input`, `predict_batch`, `write`). **Real data: Stage C**. W4 benchmark separates guarded from raw latency (synthetic releases only) | Validate/transform/predict are not timed separately in `predict` (accepted P5); no CloudWatch or X-Ray; AgentCore Observability not covered | W1–W3 concept part deferred | — |
+| 4.2.3 | Set up dashboards to monitor performance metrics. | concept deferred | **S** | `monitor-report`: a static Markdown report across batches (prints only). **Real data: Stage C** | A static report, not a dashboard | Concept deferred | — |
 | 4.2.4 | Optimize capacity for cost, performance, and reliability. | ✅ P4 W4 §7 | **C + S** | Scaling target with headroom (`invocations_per_instance_target`) and cost comparison (`compare`); guide covers min/max instances, cooldown, and load time vs scale-out | Nothing is actually scaled; no reliability or load test | — | — |
-| 4.2.5 | Optimize costs and set cost quotas by using appropriate cost management tools. | — | **—** | — | | Guide (planned C) | — |
+| 4.2.5 | Optimize costs and set cost quotas by using appropriate cost management tools. | ✅ P4 CON-6 | **C** | Guide P4 CON-6. Guide only (concept, no code) | No cost management tool used | — | — |
 | 4.2.6 | Optimize infrastructure costs by selecting purchasing options. | ✅ P4 W4 §6 | **C** | Guide: On-Demand, Savings Plans, Spot (training), serverless provisioned concurrency. `cost.py` takes the hourly price as an input, so a discounted rate can be plugged in | Purchasing options are not modelled in code (no commitment term or discount logic); downgraded from the planned C + S | — | — |
 | 4.2.7 | Evaluate cost implications of using FMs for inference in production. | — | **M** | — | | M1 (+ guide C) | M1 |
 | 4.2.8 | Monitor agent resource consumption patterns. | — | **X** | — | Out of scope (A1) | — | — |
@@ -280,14 +282,14 @@ The columns and conventions are the same as in Domain 3.
 | Skill | Official text | Concept | Implementation | Evidence | Limitations | Next step | MP |
 |---|---|---|---|---|---|---|---|
 | 4.3.1 | Secure continuous integration and continuous delivery (CI/CD) pipelines by checking for code and image vulnerabilities (for example, by using Amazon CodeGuru, Amazon Inspector). | ✅ P4 W5 §4–5 | **P** | Secret scan as a CI step (`scripts/secret_scan.py`, stdlib regex for 11 credential formats, tracked plus untracked-not-ignored files, values never printed); tests with runtime-built fake credentials (`test_secret_scan.py`); the repo itself scans clean (`test_repo_hygiene.py`). CodeGuru and Inspector are conceptual only (guide) | Regex scan of known formats only: no entropy detection, no git history, no ignored files; no dependency or image vulnerability scan (D9); no container image exists | — | — |
-| 4.3.2 | Configure least privilege access to ML and AI artifacts. | ✅ P4 W5 §4b | **P** | Holdout guard file 0600; guard key file must be owner-only. W5: a new release directory is created 0700 and its files 0600, set exactly whatever the umask, and checked before the atomic rename. A looser or unexpected entry blocks the release (`release.create_release`, `tracking.atomic_directory(mode=)`, `tracking.write_json(mode=)`). Tests: `test_release_permissions.py`, synthetic releases under umasks 000, 022, 027, 077 and 277; failures leave no release | Local POSIX file modes only, not IAM. Releases created before W5, including the real `rel-20261116T123424Z-d93c9b` (0755), are not changed. The production pointer, audit log and `releases/` parent keep umask defaults. Same-user processes can still read everything. Not enforced on Windows | Guide: IAM (C) | — |
-| 4.3.3 | Configure IAM policies and roles for users and applications in ML and AI systems. | — | **—** | — | No IAM locally | Guide (planned C) | — |
-| 4.3.4 | Configure comprehensive monitoring, auditing, compliance, and logging for ML and AI systems (for example, AWS CloudTrail, AWS Config). | — | **S** | Append-only `audit_log.jsonl` (release, gate failure, promote, rollback events); release manifests; monitoring JSONL. **Real data: B2, Stage C** | No CloudTrail or Config; logs are local files | Guide (C part) | — |
-| 4.3.5 | Troubleshoot and debug security issues in ML and AI systems. | — | **P** | Actionable fail-closed errors for hash, version, key, guard and baseline problems (`inference.py`, `release.py`, `monitoring.py`), with tests | No AWS access-denied, KMS or VPC troubleshooting | Guide (C part) | — |
-| 4.3.6 | Create VPCs, subnets, and security groups to securely isolate ML and AI systems. | — | **—** | — | | Guide (planned C) | — |
-| 4.3.7 | Identify and mitigate security risks and vulnerabilities in ML and AI systems. | ◐ P4 W5 §4 | **I** (local) | sha256 checked before unpickling (TD-5); input validation; HMAC holdout guard with external key (W1); no IDs or raw values in logs, records or reports (tests). **Real data: B2, Stage C**. W5: secret scan in CI; tests that `data/`, `docs/` and `.venv/` stay ignored and no data file is tracked (`test_repo_hygiene.py`) | No signing (manifest and model can be replaced together); holdout guard matches exact strings only (accepted M3) | Guide: W1–W3 chapter | — |
-| 4.3.8 | Select the appropriate credential type to access FMs (for example, Amazon Bedrock API keys, IAM credentials). | — | **—** | — | | Guide (planned C) / M1 | M1 |
-| 4.3.9 | Implement safeguards and sensitive data protection to meet application requirements and responsible AI policies (for example, by using Amazon Bedrock Guardrails). | — | **P** | Customer IDs and raw feature values excluded from monitoring records and reports (tests); holdout IDs stored only as HMACs; D2-Q2 counts-only drift report | Bedrock Guardrails not covered; rejects files keep `customer_id` locally by decision (D3) | Guardrails → M1 | M1 |
+| 4.3.2 | Configure least privilege access to ML and AI artifacts. | ✅ P4 W5 §4b; IAM: P4 CON-7 | **P** | Holdout guard file 0600; guard key file must be owner-only. W5: a new release directory is created 0700 and its files 0600, set exactly whatever the umask, and checked before the atomic rename. A looser or unexpected entry blocks the release (`release.create_release`, `tracking.atomic_directory(mode=)`, `tracking.write_json(mode=)`). Tests: `test_release_permissions.py`, synthetic releases under umasks 000, 022, 027, 077 and 277; failures leave no release | Local POSIX file modes only, not IAM. Releases created before W5, including the real `rel-20261116T123424Z-d93c9b` (0755), are not changed. The production pointer, audit log and `releases/` parent keep umask defaults. Same-user processes can still read everything. Not enforced on Windows | — | — |
+| 4.3.3 | Configure IAM policies and roles for users and applications in ML and AI systems. | ✅ P4 CON-7 | **C** | Guide P4 CON-7. Guide only (concept, no code) | No IAM locally | — | — |
+| 4.3.4 | Configure comprehensive monitoring, auditing, compliance, and logging for ML and AI systems (for example, AWS CloudTrail, AWS Config). | concept deferred | **S** | Append-only `audit_log.jsonl` (release, gate failure, promote, rollback events); release manifests; monitoring JSONL. **Real data: B2, Stage C** | No CloudTrail or Config; logs are local files | Concept deferred | — |
+| 4.3.5 | Troubleshoot and debug security issues in ML and AI systems. | concept deferred | **P** | Actionable fail-closed errors for hash, version, key, guard and baseline problems (`inference.py`, `release.py`, `monitoring.py`), with tests | No AWS access-denied, KMS or VPC troubleshooting | Concept deferred | — |
+| 4.3.6 | Create VPCs, subnets, and security groups to securely isolate ML and AI systems. | ✅ P4 CON-8 | **C** | Guide P4 CON-8. Guide only (concept, no code) | No network layer | — | — |
+| 4.3.7 | Identify and mitigate security risks and vulnerabilities in ML and AI systems. | ◐ P4 W5 §4 | **I** (local) | sha256 checked before unpickling (TD-5); input validation; HMAC holdout guard with external key (W1); no IDs or raw values in logs, records or reports (tests). **Real data: B2, Stage C**. W5: secret scan in CI; tests that `data/`, `docs/` and `.venv/` stay ignored and no data file is tracked (`test_repo_hygiene.py`) | No signing (manifest and model can be replaced together); holdout guard matches exact strings only (accepted M3) | W1–W3 concept part deferred | — |
+| 4.3.8 | Select the appropriate credential type to access FMs (for example, Amazon Bedrock API keys, IAM credentials). | ✅ P4 CON-9 | **C** | Guide P4 CON-9. Guide only (concept, no code) | No FM; FM access belongs to M1 | M1 | M1 |
+| 4.3.9 | Implement safeguards and sensitive data protection to meet application requirements and responsible AI policies (for example, by using Amazon Bedrock Guardrails). | concept deferred | **P** | Customer IDs and raw feature values excluded from monitoring records and reports (tests); holdout IDs stored only as HMACs; D2-Q2 counts-only drift report | Bedrock Guardrails not covered; rejects files keep `customer_id` locally by decision (D3) | Concept deferred; Guardrails → M1 | M1 |
 
 ### Domain 4 summary
 
@@ -299,9 +301,35 @@ The columns and conventions are the same as in Domain 3.
 | P | 4.1.1, 4.2.2, 4.3.1, 4.3.2, 4.3.5, 4.3.9 |
 | C + I | 4.1.4 |
 | C + S | 4.2.4 |
-| C | 4.2.1, 4.2.6 |
-| — (planned; not done) | 4.2.5, 4.3.3, 4.3.6, 4.3.8 |
+| C | 4.2.1, 4.2.5, 4.2.6, 4.3.3, 4.3.6, 4.3.8 |
 | M | 4.1.6, 4.2.7, 4.2.9, 4.2.10 |
 | X | 4.1.5, 4.2.8 |
 
 Every Domain 3 and Domain 4 row has AWS hands-on status "none".
+
+## Phase 4 final status
+
+Four separate questions per work item. "Real data" means the item ran on this project's real artefacts (with the stated approvals), not on synthetic fixtures. The CI numbers come from the earlier W5 run at commit `521089e` (671 passed, 5 deselected). They were not re-run for this documentation round.
+
+| Work item | Implemented | Tested | Validated with real data | AWS hands-on |
+|---|---|---|---|---|
+| TD-3 split-drift refusal | Yes (`9114abd`) | Yes, synthetic | No | None |
+| TD-5 guarded inference | Yes (`180714d`) | Yes, synthetic | Yes, indirectly: used by B2 and Stage C | None |
+| W1 release registry | Yes | Yes, synthetic | Yes: B2 (release created, checked and promoted). Real `rollback` not exercised | None |
+| D7 synthetic traffic | Yes | Yes, synthetic | Yes: D7 run on the real split and master (synthetic IDs, resampled train rows) | None |
+| W2 batch predict | Yes (`ac450e0`) | Yes, synthetic | Yes: Stage C (1000/1000 scored, 0 rejects) | None |
+| W3 monitoring | Yes (`ac450e0`) | Yes, synthetic | Yes: Stage C (no alerts). Drift alerts shown on synthetic scenarios only; no labels, so no performance monitoring | None |
+| W4 benchmark and cost | Yes (`4287613`) | Yes, structure only | **No**: synthetic releases only; a real-champion benchmark (R3) needs authorisation | None |
+| W6 A/B helpers | Yes (`4324cd3`) | Yes, synthetic IDs | Not applicable: reads no data; no online test | None |
+| W5 CI, secret scan, release permissions | Yes (`521089e`) | Yes: CI 671 passed, 5 deselected | **No**, by design: CI reads no real data. The `real_data` tests and real `check-release` need authorisation. The existing real release keeps mode 0755. Windows was not tested (fallback simulated only) | None |
+| D14/D15, pure-concept chapters | Not applicable (guide only) | Not applicable | Not applicable | None |
+
+**Still open (recorded, not done):**
+- Real-data runs that need authorisation: R3 (champion benchmark), the five `real_data` tests, real `check-release`, and tightening the existing release to 0700/0600.
+- AWS hands-on: none for any skill.
+- W1–W3 concept supplements: `concept deferred` (3.1.3, 3.3.1, 3.3.3, 3.3.5, 3.3.6, 4.1.1, 4.1.2, 4.2.3, 4.3.4, 4.3.5, 4.3.9).
+- Known limits:
+  - W2: P5 timings (M2), M3 and L1.
+  - W3: the review notes.
+  - Tech debt: TD-1, TD-2, TD-4 and TD-6 (`TECH_DEBT.md`).
+  - Mini-projects: M1 and M2.

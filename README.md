@@ -1,8 +1,11 @@
-# Customer Churn Data Pipeline: Phase 1 (Ingestion and Storage) and Phase 2 (Data Preparation)
+# Customer Churn Data Pipeline: Phases 1–4 (Local MLA-C02 Learning Project)
 
-A small, local, reproducible pipeline that collects, validates, merges, and stores data for a customer-churn classification task. I built it as a learning project for **AWS Certified Machine Learning Engineer – Associate (MLA-C02), Domain 1, Task 1.1 "Collect and store data"**. It uses no AWS or other paid services.
+A small, local, reproducible pipeline that collects, validates, merges, and stores data for a customer-churn classification task. I built it as a learning project for **AWS Certified Machine Learning Engineer – Associate (MLA-C02)**. It started with Domain 1, Task 1.1 "Collect and store data", and now spans Domains 1–4. It uses no AWS or other paid services.
 
-Phase 1 covers ingestion and storage. Phase 2 covers transformation and feature engineering: missing values, encoding, scaling, a reproducible split, and leakage prevention (see [Phase 2](#phase-2-features-and-leakage-prevention)). Phase 3 covers model development: leakage-safe cross-validation, hyperparameter search, model selection with uncertainty, a cost-based threshold, a one-time test evaluation, explanations, subgroup metrics, and drift baselines (see [Phase 3](#phase-3-model-development)). Roadmap: Phase 1 data ingestion and storage; Phase 2 data preparation; Phase 3 ML and AI model development; Phase 4 deployment, orchestration, monitoring, and maintenance. Phase 4 is partly implemented, locally only. Done: guarded inference, a release registry with a holdout guard, synthetic traffic, batch predict and monitoring (see [Phase 4](#phase-4-local-deployment-and-monitoring-partial)). Also done: a latency benchmark and a cost model (W4, on synthetic releases only). Also done: A/B design helpers (W6: sticky variant assignment and sample size; no online test and no simulated outcomes). Also done: a local CI script with a secret scan (W5; no hosted CI). Domain 1–4 skill coverage is tracked in [`MLA_C02_COVERAGE.md`](MLA_C02_COVERAGE.md). Known open bugs are tracked in [`TECH_DEBT.md`](TECH_DEBT.md).
+Phase 1 covers ingestion and storage. Phase 2 covers transformation and feature engineering: missing values, encoding, scaling, a reproducible split, and leakage prevention (see [Phase 2](#phase-2-features-and-leakage-prevention)). Phase 3 covers model development: leakage-safe cross-validation, hyperparameter search, model selection with uncertainty, a cost-based threshold, a one-time test evaluation, explanations, subgroup metrics, and drift baselines (see [Phase 3](#phase-3-model-development)). Phase 4 covers deployment, orchestration, monitoring, and maintenance. It is closed as a **local-only** phase, with no AWS deployment and no AWS hands-on (see [Phase 4](#phase-4-local-deployment-and-monitoring)). It has these parts:
+- **Real-data validation:** guarded inference, a release registry with a holdout guard, synthetic traffic, and batch predict with monitoring (Stage C).
+- **Synthetic-only:** a latency benchmark and a cost model (W4); A/B design helpers (W6); a local CI script with a secret scan and owner-only release permissions (W5).
+- **Concept chapters:** SageMaker serving and containers (D14/D15) and other AWS topics. These live in a git-ignored guide. Domain 1–4 skill coverage is tracked in [`MLA_C02_COVERAGE.md`](MLA_C02_COVERAGE.md). Known open bugs are tracked in [`TECH_DEBT.md`](TECH_DEBT.md).
 
 ---
 
@@ -290,7 +293,7 @@ Results on the real data (seed 42, 20 trials per family, 2026-11-08):
   - The split is random, not temporal, so these numbers don't estimate performance on future customers.
   - The test set is small (280 churners), so its CIs are wide.
 
-## Phase 4: local deployment and monitoring (partial)
+## Phase 4: local deployment and monitoring
 
 Everything here runs locally. There is no AWS deployment, and the AWS services named in [`MLA_C02_COVERAGE.md`](MLA_C02_COVERAGE.md) are conceptual only.
 
@@ -331,8 +334,18 @@ churn-pipeline --data-dir DIR benchmark --release <release_id> [--repeats 20 --b
 - **Score PSI is a limited signal.** Its baseline is validation scores, but the synthetic traffic is resampled from train rows, so it must not be read on its own as drift or as degradation.
 - **Untested on real data.** Drift alerts were shown only on synthetic scenarios, and rollback has not been exercised on real data.
 
-**Remaining work:**
-- Conceptual guides, and the D14/D15 notes on the SageMaker serving contract and containers.
+**Status:** Phase 4 is closed. The work items are implemented and tested locally (latest CI: 671 passed, 5 deselected, at commit `521089e`). See the four-way split (implemented / tested / validated with real data / AWS hands-on) in [`MLA_C02_COVERAGE.md`](MLA_C02_COVERAGE.md#phase-4-final-status).
+
+**Not done:**
+- **Real-data runs that need separate authorisation:**
+  - a benchmark of the real champion (R3);
+  - the five `real_data` tests;
+  - a real `check-release`;
+  - tightening the existing real release (mode 0755) to 0700/0600.
+- **Other gaps:**
+  - no AWS hands-on of any kind;
+  - no test on Windows;
+  - the W1–W3 concept supplements are deferred.
 
 ## Tests
 
