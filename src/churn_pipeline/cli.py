@@ -16,7 +16,11 @@ from .synthetic import write_synthetic
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="churn-pipeline", description=__doc__)
-    parser.add_argument("--data-dir", type=Path, default=DEFAULT_PATHS.data_dir)
+    # Default None = "not given". Every command except simulate-traffic then falls back to
+    # DEFAULT_PATHS.data_dir exactly as before; simulate-traffic requires an explicit value.
+    parser.add_argument("--data-dir", type=Path, default=None,
+                        help="data directory (default: the project's data/; "
+                             "simulate-traffic requires it explicitly)")
     sub = parser.add_subparsers(dest="command", required=True)
 
     sub.add_parser("download", help="download and checksum-verify the IBM CSV")
@@ -80,6 +84,10 @@ def main(argv: list[str] | None = None) -> int:
     # real run: suffix, expected count, output dir and batch name must all be given.
     st = sub.add_parser("simulate-traffic", help="W2/D7: resample train rows into synthetic "
                                                  "traffic with certified synthetic IDs")
+    # Own dest: a subparser default would otherwise overwrite a parent-level --data-dir.
+    st.add_argument("--data-dir", dest="sim_data_dir", type=Path, default=None, metavar="DIR",
+                    help="REQUIRED for this command (here or before 'simulate-traffic'); "
+                         "there is no default data directory")
     st.add_argument("--suffix", required=True, help="pre-approved synthetic ID suffix")
     st.add_argument("--expected-count", required=True, type=int,
                     help="expected number of real customer IDs (collision check)")
@@ -92,7 +100,16 @@ def main(argv: list[str] | None = None) -> int:
                                                  "overwritten")
 
     args = parser.parse_args(argv)
-    paths = Paths(args.data_dir)
+    if args.command == "simulate-traffic":
+        # Checked before any handler runs: no stat, no read, no output without a data dir.
+        given = {d for d in (args.data_dir, args.sim_data_dir) if d is not None}
+        if not given:
+            st.error("--data-dir is required for simulate-traffic (no default data directory)")
+        if len(given) > 1:
+            st.error("conflicting --data-dir values; give it once")
+        paths = Paths(given.pop())
+    else:
+        paths = Paths(args.data_dir if args.data_dir is not None else DEFAULT_PATHS.data_dir)
 
     if args.command == "download":
         p = download_ibm_csv(paths.ibm_csv)

@@ -355,3 +355,70 @@ def test_cli_failure_while_writing_leaves_no_partial_batch(env, tmp_path, monkey
     assert cli.main(cli_args(env, out)) == 2
     assert calls == ["b1.parquet", "b1.json"]          # the data file had been placed
     assert batch_files(out) == []                      # ...and was removed again; no temps
+
+
+# ---------------------------------------------------------------------------
+# --data-dir must be explicit for simulate-traffic (either position); other commands
+# keep the old default. No test here touches the real data directory: the other-command
+# check intercepts the handler's first call before any filesystem access.
+# ---------------------------------------------------------------------------
+def sim_argv(env, out_dir, where):
+    tail = cli_args(env, out_dir)[2:]  # drop the global "--data-dir DIR"
+    assert tail[0] == "simulate-traffic"
+    d = str(env["paths"].data_dir)
+    if where == "global":
+        return ["--data-dir", d, *tail]
+    if where == "sub":
+        return [tail[0], "--data-dir", d, *tail[1:]]
+    if where == "both":
+        return ["--data-dir", d, tail[0], "--data-dir", d, *tail[1:]]
+    return tail  # "none"
+
+
+def test_cli_without_data_dir_is_refused_before_any_access(env, tmp_path, spies, capsys):
+    out = tmp_path / "traffic"
+    with pytest.raises(SystemExit) as exc:
+        cli.main(sim_argv(env, out, "none"))
+    assert exc.value.code == 2
+    assert "--data-dir is required" in capsys.readouterr().err
+    assert spies["binding_calls"] == [] and spies["reads"] == []   # no stat, no read
+    assert batch_files(out) == []                                   # no output
+
+
+@pytest.mark.parametrize("where", ["global", "sub", "both"])
+def test_cli_data_dir_is_accepted_before_or_after_the_subcommand(env, tmp_path, spies, where):
+    out = tmp_path / "traffic"
+    assert cli.main(sim_argv(env, out, where)) == 0
+    assert batch_files(out) == ["b1.json", "b1.parquet"]
+    assert spies["binding_calls"] == ["split_assignments.parquet"]  # access budget unchanged
+    assert [r["file"] for r in spies["reads"]] == ["split_assignments.parquet",
+                                                   "customer_master.parquet"]
+
+
+def test_cli_conflicting_data_dirs_are_refused(env, tmp_path, spies):
+    tail = cli_args(env, tmp_path / "traffic")[2:]
+    argv = ["--data-dir", str(tmp_path / "elsewhere"), tail[0],
+            "--data-dir", str(env["paths"].data_dir), *tail[1:]]
+    with pytest.raises(SystemExit) as exc:
+        cli.main(argv)
+    assert exc.value.code == 2 and spies["reads"] == [] and spies["binding_calls"] == []
+
+
+class _Captured(Exception):
+    pass
+
+
+@pytest.mark.parametrize("given", [None, "tmp"])
+def test_other_commands_keep_their_data_dir_behaviour(tmp_path, monkeypatch, given):
+    """build-features' first action is plan_feature_write(paths.features); it is replaced
+    so the resolved path is captured before ANY filesystem access."""
+    from churn_pipeline.config import DEFAULT_PATHS
+
+    def capture(features_dir):
+        raise _Captured(features_dir)
+    monkeypatch.setattr(cli, "plan_feature_write", capture)
+    argv = (["--data-dir", str(tmp_path / "d")] if given else []) + ["build-features"]
+    with pytest.raises(_Captured) as exc:
+        cli.main(argv)
+    expected = Paths(tmp_path / "d").features if given else DEFAULT_PATHS.features
+    assert exc.value.args[0] == expected
