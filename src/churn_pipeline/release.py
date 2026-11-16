@@ -38,7 +38,7 @@ import re
 import time
 import uuid
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Mapping
 
@@ -79,17 +79,16 @@ CAVEATS = [
     "parity) was removed by decision W1-Q2.",
 ]
 
-# D6 provenance waiver. DRAFT TEXT, pending PM approval (W1-Q7). It is not to be
-# used for a real release before that approval.
-WAIVER_TEXT_STATUS = "draft pending PM approval (W1-Q7)"
+# D6 provenance waiver: the PM-approved text (W1-Q7, B2). The reason comes from the
+# CLI (--waive-dirty-code) and the PM approval date from --waiver-approved-on. The
+# approval date is stored separately from the release creation timestamp.
 WAIVER_SCOPE = ("Applies only to release {release_id} of run {run_id}. It acknowledges that "
-                "the run's training code was uncommitted (code.dirty is true) when the model "
-                "was trained.")
+                "the run's training code was uncommitted (code.dirty was true at training "
+                "time).")
 WAIVER_LIMITATIONS = [
     "Does not rewrite code.dirty or modify any file in the run directory.",
-    "Does not claim the run is fully reproducible from a commit.",
-    "Does not authorise retraining, re-selecting the champion, or re-reading test "
-    "evaluation data.",
+    "Does not claim the run is fully reproducible from a clean Git commit.",
+    "Does not authorise retraining, champion reselection, or access to test evaluation data.",
     "Does not authorise general access to holdout/test data, real-customer scoring, "
     "repeated split access, or changes to the existing data-access restrictions.",
 ]
@@ -488,7 +487,8 @@ def _gate_g8(code, waiver: dict | None) -> dict:
         raise GateFailedError("G8", "the run manifest has no code provenance")
     if code["dirty"] is False:
         return {"status": "pass", "detail": "training code was committed"}
-    if waiver and waiver.get("status") == "active" and str(waiver.get("reason", "")).strip():
+    if waiver and waiver.get("status") == "active" and str(waiver.get("reason", "")).strip() \
+            and _is_iso_date(waiver.get("approved_on")):
         return {"status": "pass (waived)", "detail": "training code was dirty; D6 waiver recorded"}
     raise GateFailedError("G8", "training code was dirty and no provenance waiver is recorded (D6)")
 
@@ -533,11 +533,35 @@ def _historical_test_evaluation(run_dir: Path) -> dict:
             "source": "test_access.json"}
 
 
-def _make_waiver(reason: str, release_id: str, run_id: str) -> dict:
-    return {"reason": reason.strip(), "scope": WAIVER_SCOPE.format(release_id=release_id, run_id=run_id),
-            "limitations": WAIVER_LIMITATIONS, "date": datetime.now(timezone.utc).date().isoformat(),
-            "completion_condition": WAIVER_COMPLETION, "status": "active",
-            "text_status": WAIVER_TEXT_STATUS}
+def _is_iso_date(value) -> bool:
+    if not isinstance(value, str) or not re.fullmatch(r"\d{4}-\d{2}-\d{2}", value):
+        return False
+    try:
+        date.fromisoformat(value)
+    except ValueError:
+        return False
+    return True
+
+
+def _check_approval_date(value) -> str:
+    """The PM approval date: a real YYYY-MM-DD calendar date, not in the future (UTC)."""
+    if not _is_iso_date(value):
+        raise ReleaseError("a provenance waiver needs a PM approval date in YYYY-MM-DD form")
+    if date.fromisoformat(value) > datetime.now(timezone.utc).date():
+        raise ReleaseError("the waiver approval date is in the future")
+    return value
+
+
+def _make_waiver(reason: str, approved_on: str, recorded_at: str,
+                 release_id: str, run_id: str) -> dict:
+    return {"reason": reason.strip(),
+            "scope": WAIVER_SCOPE.format(release_id=release_id, run_id=run_id),
+            "limitations": WAIVER_LIMITATIONS,
+            "completion_condition": WAIVER_COMPLETION,
+            "status": "active",
+            "approved_on": approved_on,      # PM approval date (given by the caller)
+            "recorded_at": recorded_at,      # release creation timestamp (UTC)
+            "text_status": f"approved by PM on {approved_on}"}
 
 
 def _write_private_json(path: Path, obj) -> None:
@@ -555,12 +579,16 @@ def _new_release_id() -> str:
 # Workflow: release, check-release, promote, rollback
 # ---------------------------------------------------------------------------
 def create_release(paths: Paths, run_id: str, key: bytes, *, waiver_reason: str | None = None,
-                   release_id: str | None = None,
+                   waiver_approved_on: str | None = None, release_id: str | None = None,
                    latency_budget_s: float = DEFAULT_LATENCY_BUDGET_S) -> dict:
     """Run G1, G2, G3, G8, G4, G9, G5 and G7, then write an immutable release directory."""
     _check_key(key)
     if waiver_reason is not None and not waiver_reason.strip():
         raise ReleaseError("a provenance waiver needs a non-empty reason")
+    if waiver_reason is not None:
+        _check_approval_date(waiver_approved_on)
+    elif waiver_approved_on is not None:
+        raise ReleaseError("a waiver approval date was given without a waiver reason")
     run_dir, run_manifest = _read_run_manifest(paths, run_id)
     release_id = _safe_name(release_id or _new_release_id(), "release id")
     final = _releases_dir(paths) / release_id
@@ -574,7 +602,9 @@ def create_release(paths: Paths, run_id: str, key: bytes, *, waiver_reason: str 
         model = _gate_g3(run_dir)
         gates["G3"] = {"status": "pass", "detail": "input columns, encoder columns, categories "
                                                    "within the Phase 1 domain, classes [0, 1]"}
-        waiver = _make_waiver(waiver_reason, release_id, run_id) if waiver_reason else None
+        created_at = _now()
+        waiver = (_make_waiver(waiver_reason, waiver_approved_on, created_at, release_id, run_id)
+                  if waiver_reason else None)
         gates["G8"] = _gate_g8(run_manifest.get("code"), waiver)
         history = _historical_test_evaluation(run_dir)
         split_sha, holdout_ids = _read_holdout_ids(paths, run_manifest)
@@ -597,7 +627,7 @@ def create_release(paths: Paths, run_id: str, key: bytes, *, waiver_reason: str 
             manifest = {
                 "release_schema_version": RELEASE_SCHEMA_VERSION,
                 "release_id": release_id,
-                "created_at": _now(),
+                "created_at": created_at,
                 "run_id": run_id,
                 "model_sha256": run_manifest["model_sha256"],
                 "decision": {"threshold": model.threshold, "fn_cost": params.get("fn_cost"),

@@ -67,6 +67,8 @@ def main(argv: list[str] | None = None) -> int:
     rl.add_argument("--run", required=True, help="run id under models/")
     rl.add_argument("--waive-dirty-code", metavar="REASON",
                     help="record a D6 provenance waiver for a run trained on uncommitted code")
+    rl.add_argument("--waiver-approved-on", metavar="YYYY-MM-DD",
+                    help="PM approval date of the waiver (required with --waive-dirty-code)")
     ck = sub.add_parser("check-release", help="W1: re-run release gates (never re-reads the split)")
     ck.add_argument("--release", required=True)
     pm = sub.add_parser("promote", help="W1: gate, move the production pointer, smoke-test; "
@@ -135,7 +137,8 @@ def _release_command(paths: Paths, args) -> int:
     try:
         key = rel.load_guard_key()
         if args.command == "release":
-            m = rel.create_release(paths, args.run, key, waiver_reason=args.waive_dirty_code)
+            m = rel.create_release(paths, args.run, key, waiver_reason=args.waive_dirty_code,
+                                   waiver_approved_on=args.waiver_approved_on)
             print(f"Release {m['release_id']} created for run {m['run_id']}")
             for gate, result in m["gates"].items():
                 print(f"  {gate}: {result['status']}")

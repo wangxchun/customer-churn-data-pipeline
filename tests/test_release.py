@@ -25,6 +25,7 @@ from test_inference import INPUT_COLUMNS, edit_manifest, fit_model, synthetic_ma
 KEY = bytes(range(32))                 # synthetic HMAC key, never a real one
 OTHER_KEY = bytes(range(100, 132))
 RUN_ID = "20990101T000000Z-syn001"
+APPROVED_ON = "2026-11-16"             # synthetic PM approval date for waiver tests
 MASTER_SHA = "c" * 64                  # a recorded value; W1 copies it, never recomputes it
 
 
@@ -298,11 +299,19 @@ def test_g8_waiver_is_recorded_and_dirty_flag_is_kept(tmp_path, model, assignmen
     paths = make_env(tmp_path, model, assignments, dirty=True)
     run_manifest_before = (paths.models / RUN_ID / "manifest.json").read_text()
     m = rel.create_release(paths, RUN_ID, KEY, waiver_reason="synthetic test waiver",
-                           release_id="rel-syn-w")
+                           waiver_approved_on=APPROVED_ON, release_id="rel-syn-w")
     assert m["code"]["dirty"] is True                       # never rewritten to clean
     w = m["provenance_waiver"]
     assert w["reason"] == "synthetic test waiver" and w["status"] == "active"
-    assert {"scope", "limitations", "date", "completion_condition"} <= set(w)
+    assert w["approved_on"] == APPROVED_ON                  # PM approval date, as given
+    assert w["recorded_at"] == m["created_at"]              # release creation timestamp, UTC
+    assert "T" in w["recorded_at"] and w["recorded_at"].endswith("+00:00")
+    assert "date" not in w                                  # no ambiguous single date
+    assert w["text_status"] == f"approved by PM on {APPROVED_ON}"
+    assert w["scope"] == rel.WAIVER_SCOPE.format(release_id="rel-syn-w", run_id=RUN_ID)
+    assert "code.dirty was true at training time" in w["scope"]
+    assert w["limitations"] == rel.WAIVER_LIMITATIONS
+    assert w["completion_condition"] == rel.WAIVER_COMPLETION
     assert m["gates"]["G8"]["status"] == "pass (waived)"
     assert (paths.models / RUN_ID / "manifest.json").read_text() == run_manifest_before
 
@@ -310,7 +319,25 @@ def test_g8_waiver_is_recorded_and_dirty_flag_is_kept(tmp_path, model, assignmen
 def test_blank_waiver_reason_is_rejected(tmp_path, model, assignments):
     paths = make_env(tmp_path, model, assignments, dirty=True)
     with pytest.raises(rel.ReleaseError):
-        rel.create_release(paths, RUN_ID, KEY, waiver_reason="   ")
+        rel.create_release(paths, RUN_ID, KEY, waiver_reason="   ", waiver_approved_on=APPROVED_ON)
+
+
+@pytest.mark.parametrize("approved_on", [None, "", "2026-13-01", "16/11/2026", "2026-11-16T00:00",
+                                         "20261116", " 2026-11-16", "2999-01-01"])
+def test_waiver_needs_a_valid_past_approval_date_before_anything_is_read(
+        tmp_path, model, assignments, parquet_spy, approved_on):
+    paths = make_env(tmp_path, model, assignments, dirty=True)
+    with pytest.raises(rel.ReleaseError, match="approval date"):
+        rel.create_release(paths, RUN_ID, KEY, waiver_reason="synthetic",
+                           waiver_approved_on=approved_on)
+    assert parquet_spy == []                                # refused before the split read
+    assert not (rel.registry_dir(paths) / "releases").exists()
+    assert rel.read_audit_log(paths) == []
+
+
+def test_approval_date_without_a_waiver_is_rejected(env):
+    with pytest.raises(rel.ReleaseError, match="approval date"):
+        rel.create_release(env, RUN_ID, KEY, waiver_approved_on=APPROVED_ON)
 
 
 def test_missing_run_is_refused(env):
@@ -549,10 +576,24 @@ def test_check_release_fails_on_a_model_changed_after_release(released):
 
 def test_check_release_rechecks_the_waiver(tmp_path, model, assignments):
     paths = make_env(tmp_path, model, assignments, dirty=True)
-    rel.create_release(paths, RUN_ID, KEY, waiver_reason="synthetic", release_id="rel-syn-w")
+    rel.create_release(paths, RUN_ID, KEY, waiver_reason="synthetic",
+                       waiver_approved_on=APPROVED_ON, release_id="rel-syn-w")
     d = release_dir(paths, "rel-syn-w")
     m = json.loads((d / "release.json").read_text())
     m["provenance_waiver"] = None
+    (d / "release.json").write_text(json.dumps(m))
+    with pytest.raises(rel.GateFailedError) as exc:
+        rel.check_release(paths, "rel-syn-w", KEY)
+    assert exc.value.gate == "G8"
+
+
+def test_check_release_rejects_a_waiver_without_an_approval_date(tmp_path, model, assignments):
+    paths = make_env(tmp_path, model, assignments, dirty=True)
+    rel.create_release(paths, RUN_ID, KEY, waiver_reason="synthetic",
+                       waiver_approved_on=APPROVED_ON, release_id="rel-syn-w")
+    d = release_dir(paths, "rel-syn-w")
+    m = json.loads((d / "release.json").read_text())
+    del m["provenance_waiver"]["approved_on"]
     (d / "release.json").write_text(json.dumps(m))
     with pytest.raises(rel.GateFailedError) as exc:
         rel.check_release(paths, "rel-syn-w", KEY)
@@ -730,10 +771,22 @@ def test_cli_dirty_run_needs_waiver(tmp_path, model, assignments, cli_key, capsy
     paths = make_env(tmp_path, model, assignments, dirty=True)
     assert run_cli(paths, "release", "--run", RUN_ID) == 2
     assert "G8" in capsys.readouterr().err
-    assert run_cli(paths, "release", "--run", RUN_ID,
-                   "--waive-dirty-code", "synthetic reason") == 0
+    assert run_cli(paths, "release", "--run", RUN_ID, "--waive-dirty-code", "synthetic reason",
+                   "--waiver-approved-on", APPROVED_ON) == 0
     m = json.loads((release_dir(paths, only_release_id(paths)) / "release.json").read_text())
     assert m["provenance_waiver"]["reason"] == "synthetic reason"
+    assert m["provenance_waiver"]["approved_on"] == APPROVED_ON
+
+
+@pytest.mark.parametrize("extra", [[], ["--waiver-approved-on", "2026-02-30"],
+                                   ["--waiver-approved-on", "yesterday"]])
+def test_cli_waiver_without_a_valid_approval_date_is_refused(
+        tmp_path, model, assignments, cli_key, capsys, extra):
+    paths = make_env(tmp_path, model, assignments, dirty=True)
+    assert run_cli(paths, "release", "--run", RUN_ID,
+                   "--waive-dirty-code", "synthetic reason", *extra) == 2
+    assert "approval date" in capsys.readouterr().err
+    assert not (rel.registry_dir(paths) / "releases").exists()
 
 
 def test_cli_gate_failure_exits_2(env, cli_key, capsys):
