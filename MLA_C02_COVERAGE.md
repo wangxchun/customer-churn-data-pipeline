@@ -22,7 +22,8 @@ This register tracks, skill by skill, what this local learning project actually 
     - W1 release `rel-20261116T123424Z-d93c9b` was created, checked and promoted.
     - D7 traffic batch `d7-none-n1000-seed42` was generated.
     - The stage C acceptance batch `20261116T161427Z-3c5357` was predicted and monitored.
-  - W4 (uncommitted at the time of writing): the restricted run passed, 555 passed, 2 deselected (78 of them in `test_cost.py` and `test_benchmark.py`). The benchmark ran on two **synthetic** releases (LR, RF) in a temporary directory; no real release and no real data were used.
+  - W4, commit `4287613`: the restricted run passed, 555 passed, 2 deselected (78 of them in `test_cost.py` and `test_benchmark.py`). The benchmark ran on two **synthetic** releases (LR, RF) in a temporary directory; no real release and no real data were used.
+  - W6 (uncommitted at the time of writing): `test_ab.py` uses synthetic IDs only. There was no real-data run, and none is needed: `ab.py` reads no data.
 
 ## Status codes
 
@@ -254,7 +255,7 @@ The columns and conventions are the same as in Domain 3.
 | 4.1.1 | Monitor model performance in production by using Amazon CloudWatch generative AI observability, Amazon Bedrock Model Evaluation, and drift detection pipelines. | — | **P** | Drift detection pipeline: `monitoring.py` (feature PSI vs train baseline, score PSI vs validation baseline), `test_monitoring.py`. **Real data: Stage C** (max feature PSI 0.0105, score PSI 0.027, no alerts) | No labels, so performance itself is not monitored; CloudWatch and Bedrock evaluation not covered; score-PSI baseline mismatch (D7 traffic from train rows vs validation score baseline) | Guide (CloudWatch C); Bedrock → M1 | M1 |
 | 4.1.2 | Monitor workflows to detect anomalies or errors in data processing or model inference. | — | **I** (local) | Reject rate, per-column null rate, unseen share and data-quality alerts in `monitoring.batch_record`; fail-closed errors and exit codes 0/2/3 in `predict`. **Real data: Stage C** | Local JSONL, not CloudWatch alarms | Guide (C part) | — |
 | 4.1.3 | Detect changes in data distribution that can affect model performance. | — | **I + S** | PSI with P8 thresholds (> 0.25). Scenario tests on synthetic traffic: `price_up`, `contract_mix`, `unseen_payment` and `nulls` raise the expected alerts; `none` raises none. **Real data: Stage C** (no-drift batch, no alerts) | Drift alerts are proven on synthetic shifts only; PSI ignores sample size; score PSI must not be read alone (validation baseline vs train-resampled traffic) | — | — |
-| 4.1.4 | Monitor model performance in production by using A/B testing. | — | **—** | — | No A/B tooling | W6 `ab.py` (sticky assignment + sample size; no simulated outcomes, D10) + guide | — |
+| 4.1.4 | Monitor model performance in production by using A/B testing. | ✅ P4 W6 | **C + I** (router and sample size only, D10) | `ab.assign_variant`: sha256-salted sticky assignment, verified against an independent hashlib computation, stable across `PYTHONHASHSEED`, proportions within 4 SE on 100k synthetic IDs. `ab.required_sample_size`: two-sided two-proportion z-test, matching the textbook hand example (0.20 vs 0.30 → 294 per group). Tests: `test_ab.py` (synthetic IDs only) | No online A/B test, no live traffic, no outcome collection or analysis, and no outcomes are simulated (D10); no SageMaker production variants; equal-size groups only | — | — |
 | 4.1.5 | Monitor and automate the management of agent performance and coordination (for example, coordination failure detection, truncated streaming, tool failures). | — | **X** | — | Out of scope (A1) | — | — |
 | 4.1.6 | Configure AI-specific performance monitoring for foundation models (FMs), such as Amazon Bedrock evaluations. | — | **M** | — | | M1 | M1 |
 
@@ -295,9 +296,10 @@ The columns and conventions are the same as in Domain 3.
 | I + S | 4.1.3 |
 | S | 4.2.3, 4.3.4 |
 | P | 4.1.1, 4.2.2, 4.3.2, 4.3.5, 4.3.9 |
+| C + I | 4.1.4 |
 | C + S | 4.2.4 |
 | C | 4.2.1, 4.2.6 |
-| — (planned; not done) | 4.1.4, 4.2.5, 4.3.1, 4.3.3, 4.3.6, 4.3.8 |
+| — (planned; not done) | 4.2.5, 4.3.1, 4.3.3, 4.3.6, 4.3.8 |
 | M | 4.1.6, 4.2.7, 4.2.9, 4.2.10 |
 | X | 4.1.5, 4.2.8 |
 
