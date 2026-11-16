@@ -8,9 +8,10 @@ Planned cleanup: after the MLA-C02 Domain 1–4 study block, as a separate bug-f
 |---|---|---|---|
 | TD-1 | Open (re-confirmed 2026-11-05) | Medium | No |
 | TD-2 | Open (re-confirmed 2026-11-05) | Low | No |
-| TD-3 | Fixed 2026-11-16 (commit: pending, user commit); policy: refuse + move report (recorded 2026-11-06; Phase 3 mitigation 2026-11-08) | Medium | No. Phase 3 refuses cross-split comparisons; see note |
+| TD-3 | Fixed 2026-11-16 (commit `9114abd`); policy: refuse + move report (recorded 2026-11-06; Phase 3 mitigation 2026-11-08) | Medium | No. Phase 3 refuses cross-split comparisons; see note |
 | TD-4 | Open (recorded 2026-11-06) | Low | No |
-| TD-5 | Open (recorded 2026-11-06) | Medium | No for Phase 2–3. Must be addressed before any Phase 4 inference/serving |
+| TD-5 | Fixed 2026-11-16 (commit: pending, user commit) (recorded 2026-11-06) | Medium | No. Inference must go through `churn_pipeline.inference`; see Fix |
+| TD-6 | Open (recorded 2026-11-16) | Low | No |
 
 ---
 
@@ -77,7 +78,7 @@ Planned cleanup: after the MLA-C02 Domain 1–4 study block, as a separate bug-f
   - Phase 3 only *detects* the change afterwards. Old runs then become unusable for comparison; nothing preserves the old split or reports which customers moved.
   - A split change between `train` and `evaluate` is caught. A split change that happens before any run exists can't be detected.
 - **Evidence required to close:** the three regression tests listed above, implemented against `run_features()` itself and failing on the current code, plus the chosen policy (move report, keep history, or frozen assignments).
-- **Fix (2026-11-16; commit: pending, user commit). Policy: refuse + move report.**
+- **Fix (2026-11-16; commit `9114abd`). Policy: refuse + move report.**
   - If `split_assignments.parquet` exists and the new split's content hash differs from it, `run_features()` raises `SplitDriftError` (a `DataContractError`).
   - The refusal happens before any filesystem write, including `mkdir`. All 7 artifacts are left byte-for-byte unchanged.
   - An existing split file that is unreadable, is missing `customer_id` or `split`, or has null or duplicate IDs also raises, and also writes nothing.
@@ -132,7 +133,7 @@ Planned cleanup: after the MLA-C02 Domain 1–4 study block, as a separate bug-f
 - **Impact on Phase 2–4:**
   - Phase 2–3: none. Training and evaluation data come from `build_features()`.
   - Phase 4: must be addressed before any batch or online inference.
-- **Possible fix (not decided):**
+- **Possible fix (as listed before the fix; what was built is under "Fix" below):**
   - Add an inference function (for example `transform_for_inference(df, preprocessor, report)`). It would:
     1. Run a label-free variant of `check_input()`.
     2. Check category values against `categories_from_train` and count or reject unknowns.
@@ -149,7 +150,53 @@ Planned cleanup: after the MLA-C02 Domain 1–4 study block, as a separate bug-f
   - `data/processed/models/<run_id>/model.joblib` is a full `Pipeline` (or `VotingClassifier` of Pipelines). It wraps the same `ColumnTransformer`, so it **inherits this gap**: `model.predict_proba(df)` applies none of `check_input()`'s guards.
   - Phase 3 has no inference entry point. `train`, `evaluate` and `compare` only score rows that went through `load_verified_inputs()` (`check_input()` + `_to_model_frame()`).
   - Two small additions: `evaluate` refuses to unpickle a model if the installed scikit-learn version differs from the one recorded in the run manifest, and `diagnostics.drift_experiment` *demonstrates* the unseen-category case (20% `payment_method = "Crypto wallet"`). Feature PSI flags it (1.62), the champion's score distribution barely moves (score PSI 0.002), and no error is raised.
-  - TD-5 stays Open and still blocks Phase 4.
+  - TD-5 stays Open and still blocks Phase 4. (As of 2026-11-08; fixed 2026-11-16, see below.)
+- **Fix (2026-11-16; commit: pending, user commit).** New module `src/churn_pipeline/inference.py`. It is a library only: no CLI, and it writes no files.
+  - **`load_model(run_dir)`** reads only the run directory's `manifest.json`, `selection.json` and `model.joblib`.
+    - Before unpickling, it checks: the manifest fields; `run_id` against the directory name; the sha256 of `model.joblib` and `selection.json` against the manifest; the scikit-learn version against the installed one; and that the threshold matches between `selection.json` and the manifest.
+    - After unpickling, it checks: `feature_names_in_ == FEATURE_COLUMNS`; `classes_ == [0, 1]`; and that the encoder's learned categories are a subset of the Phase 1 allowed values.
+    - Any failure raises `ModelIntegrityError`.
+    - It does not read `feature_report.json`, so the runtime does not depend on the Phase 2 directory.
+  - **`predict_batch` / `predict_one`** validate input with the Phase 1 column rules. `IBM_COLUMNS` and `IBM_ROW_RULES` are renamed to curated names and checked through the new `validation.check_value()`, which returns a reason code. `_parse_value` now delegates to it, and Phase 1 messages and behaviour are unchanged.
+    - **Values the encoder never saw:** a value that passes Phase 1 but is not among the encoder's learned categories is rejected as `unseen_category`. It is never encoded as zeros.
+    - **In a batch,** each invalid row is rejected with `(customer_id, reason_code, column, message)` and the valid rows are still scored. Every row whose `customer_id` is duplicated is rejected.
+    - **`predict_one`** raises `InferenceInputError(level="record")`.
+    - **Frame-level problems** raise `InferenceInputError(level="batch")`. These are a missing or unclassified column, or input that is not a DataFrame. The column-classification rule is the new `features.classify_columns()`, shared with `check_input()`.
+    - **NaN after preprocessing, invalid probabilities and model exceptions** raise `ScoringError`.
+    - **Exception messages** carry column names and reason codes only, never raw values or `customer_id`.
+  - **The three scenarios in the table above** now produce:
+
+    | Scenario | Reason code |
+    |---|---|
+    | `total_charges` missing with tenure 9 | `null_not_allowed` |
+    | `monthly_charges` missing | `null_not_allowed` |
+    | `contract = "Three year"` | `not_allowed` |
+
+  - A synthetic Random Forest test confirms an extra risk: the unguarded RF Pipeline scores a missing `monthly_charges` silently, with no error and no NaN. The guarded path rejects that row.
+  - **Tests:** `tests/test_inference.py` has 88 tests, all on synthetic data generated by `make_signal_master()`, with artifacts under pytest tmp directories.
+    - Before the fix, the file failed at collection with `ImportError`, because the module did not exist. This is recorded as the baseline, not as a pass.
+    - After the fix, the restricted command passed: 193 passed, 2 deselected. It excludes the two real-data tests and `tests/test_real_dataset.py`, under PM decision T5-Q8.
+  - **Mapping to the required tests:**
+    - **Test 1** is covered by `test_td5_scenarios_are_rejected_in_batch_and_raise_for_single`, for all three scenarios.
+    - **Test 2 changed scope.** Under D4 and PM decision T5-Q1 (2026-11-16), it is a synthetic three-split parity test, not a comparison against the real `train` / `validation` / `test.parquet`. The test is `test_guarded_features_equal_phase2_features_for_each_synthetic_split`. It checks that guarded features exactly equal `build_features()` output for synthetic train, validation and test. No real dataset was read. Prediction parity is also covered on synthetic data: `test_guarded_predictions_equal_direct_model_scores`.
+  - **Real champion smoke test** (T5-Q2: one time, read-only, no scoring): `load_model` on `20261108T104225Z-cdbbaf` passed all checks (15 categorical columns, 40 output features, threshold 0.2022). It read no data files, and the artifact mtimes were unchanged.
+  - **Remaining limits:**
+    - The manifest is not signed. Rewriting both `manifest.json` and `model.joblib` defeats the hash check.
+    - Test-customer IDs are not refused yet; that is the W1 holdout guard.
+    - Writing reject files belongs to W2.
+    - `evaluate` and `diagnostics` still unpickle without a hash check: see TD-6.
+
+## TD-6: `evaluate` and `diagnostics` unpickle models without verifying `model_sha256`
+
+- **Affected code:**
+  - `src/churn_pipeline/evaluation.py`, `run_final_evaluation()`. It checks only the scikit-learn version before `joblib.load`.
+  - `src/churn_pipeline/diagnostics.py`, `run_diagnostics(run_id=...)`. It checks only the data fingerprint, with no version or hash check.
+- **Gap:** both paths unpickle `model.joblib` without comparing it to `manifest["model_sha256"]`. A replaced or corrupted model file would be loaded, and its code would run. TD-5's `inference.load_model()` does verify the hash before unpickling, but these two paths don't use it.
+- **Failure scenario:** not reproduced; reasoned from the code (Phase 4 audit finding F7, 2026-11-15).
+- **Severity: Low.** Both commands run locally on self-produced run directories. `evaluate` is also already locked by the one-time test-access log.
+- **Why not fixed in TD-5:** PM decision T5-Q6 (2026-11-16). Verifying a change to `evaluate` would touch the test split or real data, which is outside TD-5's approved access.
+- **Possible fix (not decided):** reuse the integrity checks from `inference.load_model()`, or a shared helper extracted from it, before `joblib.load` in both paths.
+- **Required regression tests:** for each path, a tampered `model.joblib` raises before `joblib.load` is called, proven with a spy. Use synthetic run directories only, and never the real test split.
 
 ---
 

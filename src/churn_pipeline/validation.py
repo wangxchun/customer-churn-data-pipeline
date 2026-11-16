@@ -66,54 +66,78 @@ def _is_missing(value: Any, col: Column) -> bool:
     return False
 
 
-def _parse_value(value: Any, col: Column) -> tuple[Any, str | None]:
-    """Return (parsed_value, error_message_or_None)."""
+# Reason codes returned by ``check_value``. Phase 1 reports only the messages;
+# the codes let other callers (TD-5 inference) classify a failure without
+# parsing message text or repeating the rules.
+NULL_NOT_ALLOWED = "null_not_allowed"
+INVALID_TYPE = "invalid_type"
+NON_FINITE = "non_finite"
+MISSING_TIMEZONE = "missing_timezone"
+NOT_ALLOWED = "not_allowed"
+INVALID_FORMAT = "invalid_format"
+BELOW_MINIMUM = "below_minimum"
+
+
+def check_value(value: Any, col: Column) -> tuple[Any, str | None, str | None]:
+    """Return (parsed_value, reason_code_or_None, error_message_or_None).
+
+    The single place the per-value rules live. Messages may quote the value;
+    the reason code never does.
+    """
     if _is_missing(value, col):
-        return None, None if col.nullable else f"{col.name}: missing required value"
+        if col.nullable:
+            return None, None, None
+        return None, NULL_NOT_ALLOWED, f"{col.name}: missing required value"
 
     if col.kind == "str":
         if not isinstance(value, str):
-            return None, f"{col.name}: expected string, got {type(value).__name__}"
+            return None, INVALID_TYPE, f"{col.name}: expected string, got {type(value).__name__}"
         parsed: Any = value
     elif col.kind == "int":
         if isinstance(value, bool):
-            return None, f"{col.name}: expected integer, got bool"
+            return None, INVALID_TYPE, f"{col.name}: expected integer, got bool"
         if isinstance(value, int):
             parsed = value
         elif isinstance(value, str) and re.fullmatch(r"-?\d+", value.strip()):
             parsed = int(value)
         else:
-            return None, f"{col.name}: not an integer: {value!r}"
+            return None, INVALID_TYPE, f"{col.name}: not an integer: {value!r}"
     elif col.kind == "float":
         if isinstance(value, bool):
-            return None, f"{col.name}: expected number, got bool"
+            return None, INVALID_TYPE, f"{col.name}: expected number, got bool"
         try:
             parsed = float(value)
         except (TypeError, ValueError):
-            return None, f"{col.name}: not a number: {value!r}"
+            return None, INVALID_TYPE, f"{col.name}: not a number: {value!r}"
         if not math.isfinite(parsed):
-            return None, f"{col.name}: non-finite number: {value!r}"
+            return None, NON_FINITE, f"{col.name}: non-finite number: {value!r}"
     elif col.kind == "timestamp":
         if not isinstance(value, str):
-            return None, f"{col.name}: expected ISO-8601 string"
+            return None, INVALID_TYPE, f"{col.name}: expected ISO-8601 string"
         try:
             ts = datetime.fromisoformat(value)
         except ValueError:
-            return None, f"{col.name}: not ISO-8601: {value!r}"
+            return None, INVALID_TYPE, f"{col.name}: not ISO-8601: {value!r}"
         if ts.tzinfo is None:
             # Naive timestamps are ambiguous across time zones; refuse to guess.
-            return None, f"{col.name}: timestamp has no timezone: {value!r}"
+            return None, MISSING_TIMEZONE, f"{col.name}: timestamp has no timezone: {value!r}"
         parsed = ts.astimezone(timezone.utc)
     else:  # pragma: no cover - guarded by Kind
         raise ValueError(col.kind)
 
     if col.allowed is not None and parsed not in col.allowed:
-        return None, f"{col.name}: value {parsed!r} not in allowed set"
+        return None, NOT_ALLOWED, f"{col.name}: value {parsed!r} not in allowed set"
     if col.pattern is not None and not re.fullmatch(col.pattern, str(parsed)):
-        return None, f"{col.name}: value {parsed!r} does not match {col.pattern}"
+        return None, INVALID_FORMAT, f"{col.name}: value {parsed!r} does not match {col.pattern}"
     if col.min_value is not None and parsed < col.min_value:
-        return None, f"{col.name}: value {parsed!r} below minimum {col.min_value}"
-    return parsed, None
+        return None, BELOW_MINIMUM, f"{col.name}: value {parsed!r} below minimum {col.min_value}"
+    return parsed, None, None
+
+
+def _parse_value(value: Any, col: Column) -> tuple[Any, str | None]:
+    """Return (parsed_value, error_message_or_None)."""
+    parsed, _, message = check_value(value, col)
+    return parsed, message
 
 
 _DTYPES = {"str": "string", "int": "Int64", "float": "Float64"}

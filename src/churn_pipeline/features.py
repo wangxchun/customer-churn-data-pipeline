@@ -137,14 +137,25 @@ class FeatureResult:
 # ---------------------------------------------------------------------------
 # Input checks (stateless: they learn nothing, so running them on all rows is safe)
 # ---------------------------------------------------------------------------
+def classify_columns(columns, required: list[str], optional: tuple[str, ...] = ()
+                     ) -> tuple[list[str], list[str]]:
+    """Return (missing required columns, unclassified columns).
+
+    A column is classified if it is required, optional, or in EXCLUDED_COLUMNS.
+    Shared by training (``check_input``) and inference, so both apply the same
+    "every column must be classified" rule.
+    """
+    missing = [c for c in required if c not in columns]
+    known = set(required) | set(optional) | set(EXCLUDED_COLUMNS)
+    unclassified = [c for c in columns if c not in known]
+    return missing, unclassified
+
+
 def check_input(master: pd.DataFrame) -> None:
     required = [ID_COLUMN, TARGET_COLUMN, *FEATURE_COLUMNS]
-    missing = [c for c in required if c not in master.columns]
+    missing, unclassified = classify_columns(master.columns, required)
     if missing:
         raise SchemaError(f"customer_master: missing required columns {missing}")
-
-    known = set(required) | set(EXCLUDED_COLUMNS)
-    unclassified = [c for c in master.columns if c not in known]
     if unclassified:
         raise SchemaError(
             f"customer_master: unclassified columns {unclassified}; add each one to "
