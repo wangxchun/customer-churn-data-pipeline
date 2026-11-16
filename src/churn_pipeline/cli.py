@@ -20,7 +20,7 @@ def main(argv: list[str] | None = None) -> int:
     # DEFAULT_PATHS.data_dir exactly as before; simulate-traffic requires an explicit value.
     parser.add_argument("--data-dir", type=Path, default=None,
                         help="data directory (default: the project's data/; "
-                             "simulate-traffic requires it explicitly)")
+                             "simulate-traffic and predict require it explicitly)")
     sub = parser.add_subparsers(dest="command", required=True)
 
     sub.add_parser("download", help="download and checksum-verify the IBM CSV")
@@ -80,12 +80,29 @@ def main(argv: list[str] | None = None) -> int:
     pm.add_argument("--release", required=True)
     sub.add_parser("rollback", help="W1: point production back at the previous release")
 
+    # Phase 4 W2: batch predict through a release (holdout guard first, then TD-5).
+    pr = sub.add_parser("predict", help="W2: score a CSV/Parquet batch through a release; "
+                                        "writes predictions, rejects and a batch manifest")
+    pr.add_argument("--data-dir", dest="sub_data_dir", type=Path, default=None, metavar="DIR",
+                    help="REQUIRED for this command (here or before 'predict'); "
+                         "there is no default data directory")
+    pr.add_argument("--input", required=True, type=Path, help="input .csv or .parquet file")
+    pr.add_argument("--release", default="production",
+                    help="'production' (default) or an explicit release id")
+
+    # Phase 4 W3: static Markdown report over a release's monitoring records (read-only).
+    mr = sub.add_parser("monitor-report", help="W3: print a Markdown monitoring summary for "
+                                               "a release (reads batches.jsonl; writes nothing)")
+    mr.add_argument("--data-dir", dest="sub_data_dir", type=Path, default=None, metavar="DIR",
+                    help="REQUIRED for this command (here or before 'monitor-report')")
+    mr.add_argument("--release", required=True, help="release id")
+
     # Phase 4 W2 / D7: synthetic traffic from train rows. No defaults that could trigger a
     # real run: suffix, expected count, output dir and batch name must all be given.
     st = sub.add_parser("simulate-traffic", help="W2/D7: resample train rows into synthetic "
                                                  "traffic with certified synthetic IDs")
     # Own dest: a subparser default would otherwise overwrite a parent-level --data-dir.
-    st.add_argument("--data-dir", dest="sim_data_dir", type=Path, default=None, metavar="DIR",
+    st.add_argument("--data-dir", dest="sub_data_dir", type=Path, default=None, metavar="DIR",
                     help="REQUIRED for this command (here or before 'simulate-traffic'); "
                          "there is no default data directory")
     st.add_argument("--suffix", required=True, help="pre-approved synthetic ID suffix")
@@ -100,13 +117,15 @@ def main(argv: list[str] | None = None) -> int:
                                                  "overwritten")
 
     args = parser.parse_args(argv)
-    if args.command == "simulate-traffic":
+    if args.command in ("simulate-traffic", "predict", "monitor-report"):
         # Checked before any handler runs: no stat, no read, no output without a data dir.
-        given = {d for d in (args.data_dir, args.sim_data_dir) if d is not None}
+        sub_parser = {"simulate-traffic": st, "predict": pr, "monitor-report": mr}[args.command]
+        given = {d for d in (args.data_dir, args.sub_data_dir) if d is not None}
         if not given:
-            st.error("--data-dir is required for simulate-traffic (no default data directory)")
+            sub_parser.error(f"--data-dir is required for {args.command} "
+                             "(no default data directory)")
         if len(given) > 1:
-            st.error("conflicting --data-dir values; give it once")
+            sub_parser.error("conflicting --data-dir values; give it once")
         paths = Paths(given.pop())
     else:
         paths = Paths(args.data_dir if args.data_dir is not None else DEFAULT_PATHS.data_dir)
@@ -158,6 +177,10 @@ def main(argv: list[str] | None = None) -> int:
         return _release_command(paths, args)
     elif args.command == "simulate-traffic":
         return _simulate_command(paths, args)
+    elif args.command == "predict":
+        return _predict_command(paths, args)
+    elif args.command == "monitor-report":
+        return _monitor_report_command(paths, args)
     elif args.command == "compare":
         import json
         from .evaluation import compare_runs
@@ -208,6 +231,42 @@ def _simulate_command(paths: Paths, args) -> int:
         return 2
     print(f"Synthetic traffic written to {path} ({len(df)} rows, scenario {args.scenario}, "
           f"IDs NNNN-{source.certificate.suffix})")
+    return 0
+
+
+def _predict_command(paths: Paths, args) -> int:
+    from . import release as rel
+    from .inference import ModelIntegrityError, ScoringError
+    from .monitoring import MonitoringAppendError, MonitoringError
+    from .predict import run_predict, validate_request
+    try:
+        validate_request(args.input, args.release)  # no side effects before this passes
+        key = rel.load_guard_key()
+        m = run_predict(paths, args.input, args.release, key)
+    except MonitoringAppendError as e:
+        # The batch is committed; only its monitoring record is missing. Not a success.
+        print(f"partial: {e}", file=sys.stderr)
+        return 3
+    except (rel.ReleaseError, ModelIntegrityError, ScoringError, MonitoringError,
+            FileExistsError, FileNotFoundError, ValueError, OSError) as e:
+        print(f"refused: {type(e).__name__}: {e}", file=sys.stderr)
+        return 2
+    print(f"Batch {m['batch_id']} written to {m['output_dir']} (release {m['release_id']}; "
+          f"{m['n_scored']} scored, {m['n_rejected_rows']} rejected of {m['n_input']})")
+    return 0
+
+
+def _monitor_report_command(paths: Paths, args) -> int:
+    from .monitoring import MonitoringError, read_records, records_path, render_report
+    try:
+        path = records_path(paths, args.release)
+        if not path.exists():
+            raise MonitoringError(f"no monitoring records for release {args.release}")
+        report = render_report(args.release, read_records(paths, args.release))
+    except (MonitoringError, OSError) as e:
+        print(f"refused: {type(e).__name__}: {e}", file=sys.stderr)
+        return 2
+    print(report, end="")
     return 0
 
 
