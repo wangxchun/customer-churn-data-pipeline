@@ -61,6 +61,19 @@ def main(argv: list[str] | None = None) -> int:
     cp.add_argument("--champion", required=True)
     cp.add_argument("--challenger", required=True)
 
+    # Phase 4 W1: release registry. Key: $CHURN_HOLDOUT_GUARD_KEY_FILE (outside the repo).
+    rl = sub.add_parser("release", help="W1: gate a run and create an immutable release "
+                                        "with its holdout guard")
+    rl.add_argument("--run", required=True, help="run id under models/")
+    rl.add_argument("--waive-dirty-code", metavar="REASON",
+                    help="record a D6 provenance waiver for a run trained on uncommitted code")
+    ck = sub.add_parser("check-release", help="W1: re-run release gates (never re-reads the split)")
+    ck.add_argument("--release", required=True)
+    pm = sub.add_parser("promote", help="W1: gate, move the production pointer, smoke-test; "
+                                        "restore the pointer if the smoke test fails")
+    pm.add_argument("--release", required=True)
+    sub.add_parser("rollback", help="W1: point production back at the previous release")
+
     args = parser.parse_args(argv)
     paths = Paths(args.data_dir)
 
@@ -107,10 +120,38 @@ def main(argv: list[str] | None = None) -> int:
         out = run_diagnostics(paths, TrainConfig(seed=args.seed, n_iter=args.n_iter), run_id=args.run)
         print((out["dir"] / "diagnostics.md").read_text())
         print(f"Diagnostics written to {out['dir']}")
+    elif args.command in ("release", "check-release", "promote", "rollback"):
+        return _release_command(paths, args)
     elif args.command == "compare":
         import json
         from .evaluation import compare_runs
         print(json.dumps(compare_runs(paths, args.champion, args.challenger), indent=2, default=str))
+    return 0
+
+
+def _release_command(paths: Paths, args) -> int:
+    from . import release as rel
+    from .inference import ModelIntegrityError
+    try:
+        key = rel.load_guard_key()
+        if args.command == "release":
+            m = rel.create_release(paths, args.run, key, waiver_reason=args.waive_dirty_code)
+            print(f"Release {m['release_id']} created for run {m['run_id']}")
+            for gate, result in m["gates"].items():
+                print(f"  {gate}: {result['status']}")
+        elif args.command == "check-release":
+            for gate, result in rel.check_release(paths, args.release, key).items():
+                print(f"  {gate}: {result['status']}")
+            print(f"Release {args.release}: all gates passed")
+        elif args.command == "promote":
+            p = rel.promote(paths, args.release, key)
+            print(f"Production -> {p['release_id']} (previous: {p['previous_release_id']})")
+        else:
+            p = rel.rollback(paths, key)
+            print(f"Production -> {p['release_id']} (rolled back)")
+    except (rel.ReleaseError, ModelIntegrityError, FileExistsError) as e:
+        print(f"refused: {e}", file=sys.stderr)
+        return 2
     return 0
 
 
