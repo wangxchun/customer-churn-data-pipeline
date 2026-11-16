@@ -18,7 +18,6 @@ so runs made on different splits can be detected and refused by ``compare``.
 """
 from __future__ import annotations
 
-import hashlib
 import json
 import os
 import platform
@@ -49,6 +48,7 @@ from .features import (
     DataContractError,
     _to_model_frame,  # private on purpose: reused so Phase 3 converts dtypes exactly like Phase 2
     check_input,
+    split_content_hash,  # moved to features.py (TD-3); re-exported here for existing callers
 )
 
 
@@ -68,17 +68,6 @@ class InputFingerprint:
 class VerifiedInputs:
     data: pd.DataFrame  # customer_master + "split" column, sorted by customer_id
     fingerprint: InputFingerprint
-
-
-def split_content_hash(assignments: pd.DataFrame) -> str:
-    """sha256 of the sorted (customer_id, split) pairs.
-
-    Unlike a file checksum, this only changes when some customer's assignment
-    changes (see Phase 2 guide Part 0 #7: byte hashes can change with dtype metadata).
-    """
-    rows = assignments[[ID_COLUMN, "split"]].astype(str).sort_values(ID_COLUMN)
-    payload = "\n".join(f"{i},{s}" for i, s in zip(rows[ID_COLUMN], rows["split"]))
-    return hashlib.sha256(payload.encode()).hexdigest()
 
 
 def load_verified_inputs(paths: Paths) -> VerifiedInputs:

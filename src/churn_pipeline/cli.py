@@ -7,7 +7,7 @@ from pathlib import Path
 
 from .config import DEFAULT_PATHS, Paths
 from .download import download_ibm_csv
-from .features import SplitConfig, run_features
+from .features import SplitConfig, SplitDriftError, format_drift_report, plan_feature_write, run_features
 from .features import render_markdown as render_feature_report
 from .pipeline import run
 from .summary import render_markdown
@@ -75,8 +75,16 @@ def main(argv: list[str] | None = None) -> int:
         print(render_markdown(summary))
         print(f"Summary written to {paths.summary_md}")
     elif args.command == "build-features":
-        report = run_features(paths, SplitConfig(seed=args.seed))
+        plan = plan_feature_write(paths.features)  # read-only; taken before the build writes
+        try:
+            report = run_features(paths, SplitConfig(seed=args.seed))
+        except SplitDriftError as e:
+            print(format_drift_report(e.report), file=sys.stderr)
+            return 2
         print(render_feature_report(report, report["input_sha256"]))
+        print("Files written:")
+        for w in plan:
+            print(f"  {w['action']}: {w['path']}")
         print(f"Features written to {paths.features}")
     elif args.command == "train":
         from .modeling import TrainConfig, run_training

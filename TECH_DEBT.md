@@ -8,7 +8,7 @@ Planned cleanup: after the MLA-C02 Domain 1–4 study block, as a separate bug-f
 |---|---|---|---|
 | TD-1 | Open (re-confirmed 2026-11-05) | Medium | No |
 | TD-2 | Open (re-confirmed 2026-11-05) | Low | No |
-| TD-3 | Open (recorded 2026-11-06; Phase 3 mitigation 2026-11-08) | Medium | No. Phase 3 refuses cross-split comparisons; see note |
+| TD-3 | Fixed 2026-11-16 (commit: pending, user commit); policy: refuse + move report (recorded 2026-11-06; Phase 3 mitigation 2026-11-08) | Medium | No. Phase 3 refuses cross-split comparisons; see note |
 | TD-4 | Open (recorded 2026-11-06) | Low | No |
 | TD-5 | Open (recorded 2026-11-06) | Medium | No for Phase 2–3. Must be addressed before any Phase 4 inference/serving |
 
@@ -57,7 +57,7 @@ Planned cleanup: after the MLA-C02 Domain 1–4 study block, as a separate bug-f
 - **Current protection:** none automatic. `feature_report.json` has `input_sha256`, which signals that the input bytes changed. It doesn't show whether the assignments changed, and it is a byte fingerprint, not a content fingerprint.
 - **Severity: Medium.** The data is not corrupted. However, the gap silently invalidates model comparisons across re-runs. That matters once Phase 3 starts comparing models.
 - **Impact on Phase 2–4:** no effect on Phase 2 correctness within a single run. Phase 3 must not compare test metrics across re-runs until this is addressed (or the split is frozen).
-- **Possible fixes (not decided):**
+- **Possible fixes (as listed before the fix; the chosen policy is under "Fix" below):**
   - Before overwriting, compare against the existing `split_assignments.parquet` and record or report moved, added and removed customers.
   - Alternatively, keep previous assignment files.
   - Alternatively, support reusing a frozen assignment file for existing customers, with new customers assigned separately.
@@ -72,11 +72,31 @@ Planned cleanup: after the MLA-C02 Domain 1–4 study block, as a separate bug-f
   - `evaluate` refuses if the current split hash differs from the hash the run was trained on.
   - `compare` refuses two runs whose split hashes differ.
   - Tests: `test_training_refuses_a_master_that_phase2_did_not_build_from` and `test_compare_refuses_runs_made_on_different_splits`.
-- **Remaining risk:**
+- **Remaining risk (before the 2026-11-16 fix; kept as history):**
   - `run_features()` still overwrites `split_assignments.parquet` silently, and the previous assignment list is still lost.
   - Phase 3 only *detects* the change afterwards. Old runs then become unusable for comparison; nothing preserves the old split or reports which customers moved.
   - A split change between `train` and `evaluate` is caught. A split change that happens before any run exists can't be detected.
 - **Evidence required to close:** the three regression tests listed above, implemented against `run_features()` itself and failing on the current code, plus the chosen policy (move report, keep history, or frozen assignments).
+- **Fix (2026-11-16; commit: pending, user commit). Policy: refuse + move report.**
+  - If `split_assignments.parquet` exists and the new split's content hash differs from it, `run_features()` raises `SplitDriftError` (a `DataContractError`).
+  - The refusal happens before any filesystem write, including `mkdir`. All 7 artifacts are left byte-for-byte unchanged.
+  - An existing split file that is unreadable, is missing `customer_id` or `split`, or has null or duplicate IDs also raises, and also writes nothing.
+  - `build-features` prints the report to stderr and exits with code 2.
+  - The report contains no raw customer IDs; the decision was made 2026-11-16, D2-Q2. It holds old and new content hashes, old and new customer counts, and the counts added, removed, unchanged and moved. It also holds moves by direction, per-split sizes, change types, and the files that would have been created or overwritten.
+  - The report is not written to any file. `feature_report.json` is unchanged.
+  - The comparison casts IDs to `str`, so an object vs. string dtype difference is not treated as a change.
+  - Identical re-runs proceed as before.
+  - Tests are in `tests/test_split_drift.py`: 15 tests, all on synthetic data in `tmp_path`. Before the fix, 13 failed. The 2 that passed were the deliberate over-correction guards: an identical re-run, and a dtype-only difference.
+  - Full suite after the fix: 110 passed.
+  - Mapping to the required tests:
+    - **Test 1** is covered by `test_identical_rerun_succeeds_and_keeps_content_hash` and `test_compare_assignments_ignores_dtype_and_row_order`, which asserts 0 moved.
+    - **Test 2** is covered by `test_removed_customer_is_refused_with_counts_and_nothing_changes`. It reports the removed customer as a count (`removed: 1`), not as an ID, per D2-Q2.
+    - **Test 3:** `test_split_is_reproducible_and_independent_of_row_order` still passes.
+  - **Not covered by this fix:**
+    - There is no programmatic resplit path: no override flag, no archiving of the previous split.
+    - A legitimate split change, for example new customers, is refused. It needs a separately planned and approved design.
+    - The previous assignment list is still not archived. The fix only prevents losing it by refusing to overwrite it.
+    - Multi-file write atomicity and partial-failure recovery are not addressed. TD-4 stays Open.
 
 ## TD-4: Feature artifacts are overwritten one file at a time (not atomic as a set)
 

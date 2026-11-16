@@ -21,6 +21,7 @@ customers drawn from the same snapshot, not on a future period.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -93,6 +94,22 @@ SPLIT_NAMES = ("train", "validation", "test")
 
 class DataContractError(ValueError):
     """The data violates an assumption that a Phase 2 decision depends on."""
+
+
+class SplitDriftError(DataContractError):
+    """The new split differs from the existing split_assignments.parquet; nothing was written.
+
+    ``report`` holds counts and a change summary only, never raw customer IDs.
+    There is deliberately no override: a resplit needs its own design decision.
+    """
+
+    def __init__(self, report: dict):
+        self.report = report
+        super().__init__(
+            "refused: the new split differs from the existing split_assignments.parquet "
+            f"(added {report['added']}, removed {report['removed']}, moved {report['moved']}); "
+            "nothing was written"
+        )
 
 
 @dataclass(frozen=True)
@@ -327,6 +344,125 @@ def render_markdown(report: dict, input_sha256: str | None = None) -> str:
     return "\n".join(lines)
 
 
+# ---------------------------------------------------------------------------
+# Split drift guard (TD-3): refuse, before any write, to replace an existing split
+# ---------------------------------------------------------------------------
+SPLIT_ASSIGNMENTS_FILE = "split_assignments.parquet"
+FEATURE_OUTPUT_FILES = (
+    *(f"{name}.parquet" for name in SPLIT_NAMES), SPLIT_ASSIGNMENTS_FILE,
+    "preprocessor.joblib", "feature_report.json", "feature_report.md",
+)
+
+
+def split_content_hash(assignments: pd.DataFrame) -> str:
+    """sha256 of the sorted (customer_id, split) pairs.
+
+    Unlike a file checksum, this only changes when some customer's assignment
+    changes (see Phase 2 guide Part 0 #7: byte hashes can change with dtype metadata).
+    """
+    rows = assignments[[ID_COLUMN, "split"]].astype(str).sort_values(ID_COLUMN)
+    payload = "\n".join(f"{i},{s}" for i, s in zip(rows[ID_COLUMN], rows["split"]))
+    return hashlib.sha256(payload.encode()).hexdigest()
+
+
+def compare_assignments(old: pd.DataFrame, new: pd.DataFrame) -> dict:
+    """Summarise how ``new`` differs from ``old``: counts only, no customer IDs.
+
+    Both sides are compared as ``str`` (same as ``split_content_hash``), so an
+    object vs string dtype difference is not reported as a change.
+    """
+    o = old[[ID_COLUMN, "split"]].astype(str)
+    n = new[[ID_COLUMN, "split"]].astype(str)
+    both = o.merge(n, on=ID_COLUMN, suffixes=("_old", "_new"))
+    changed = both[both["split_old"] != both["split_new"]]
+    moves = (changed["split_old"] + "->" + changed["split_new"]).value_counts()
+    added = int((~n[ID_COLUMN].isin(o[ID_COLUMN])).sum())
+    removed = int((~o[ID_COLUMN].isin(n[ID_COLUMN])).sum())
+    old_hash, new_hash = split_content_hash(o), split_content_hash(n)
+    change_types = (["membership_changed"] if added or removed else []) + \
+                   (["assignments_moved"] if len(changed) else [])
+    return {
+        "old_split_content_sha256": old_hash,
+        "new_split_content_sha256": new_hash,
+        "identical": old_hash == new_hash,
+        "n_old": len(o),
+        "n_new": len(n),
+        "unchanged": len(both) - len(changed),
+        "moved": len(changed),
+        "moves": {k: int(v) for k, v in sorted(moves.items())},
+        "added": added,
+        "removed": removed,
+        "split_counts_old": {s: int((o["split"] == s).sum()) for s in SPLIT_NAMES},
+        "split_counts_new": {s: int((n["split"] == s).sum()) for s in SPLIT_NAMES},
+        "change_types": change_types,
+    }
+
+
+def plan_feature_write(out_dir: Path) -> list[dict]:
+    """Which output files a feature build would create or overwrite. Reads only."""
+    return [{"path": name, "action": "overwrite" if (out_dir / name).exists() else "create"}
+            for name in FEATURE_OUTPUT_FILES]
+
+
+def _read_existing_assignments(path: Path) -> pd.DataFrame:
+    try:
+        old = pd.read_parquet(path)
+    except Exception as e:  # corrupt or unreadable: fail closed, write nothing
+        raise DataContractError(
+            f"cannot read existing {SPLIT_ASSIGNMENTS_FILE} ({type(e).__name__}); "
+            "refusing to overwrite it. Nothing was written."
+        ) from e
+    missing = [c for c in (ID_COLUMN, "split") if c not in old.columns]
+    if missing:
+        raise DataContractError(
+            f"existing {SPLIT_ASSIGNMENTS_FILE} is missing columns {missing}; "
+            "refusing to overwrite it. Nothing was written."
+        )
+    ids = old[ID_COLUMN]
+    if ids.isna().any() or not ids.is_unique:
+        raise DataContractError(
+            f"existing {SPLIT_ASSIGNMENTS_FILE} has null or duplicate customer_id values; "
+            "refusing to overwrite it. Nothing was written."
+        )
+    return old
+
+
+def check_split_unchanged(out_dir: Path, new_assignments: pd.DataFrame) -> None:
+    """Raise unless writing ``new_assignments`` would leave the split unchanged.
+
+    No existing file means a first build, which is allowed. Reads only.
+    """
+    path = out_dir / SPLIT_ASSIGNMENTS_FILE
+    if not path.exists():
+        return
+    report = compare_assignments(_read_existing_assignments(path), new_assignments)
+    if not report["identical"]:
+        report["planned_writes"] = plan_feature_write(out_dir)
+        raise SplitDriftError(report)
+
+
+def format_drift_report(report: dict) -> str:
+    """Human-readable refusal for the CLI. Counts only, no customer IDs."""
+    moves = ", ".join(f"{k}: {v}" for k, v in report["moves"].items()) or "none"
+    lines = [
+        "refused: the new split differs from the existing split_assignments.parquet.",
+        "Nothing was written. There is no override; a resplit needs a separate decision.",
+        f"  old split content sha256: {report['old_split_content_sha256']}",
+        f"  new split content sha256: {report['new_split_content_sha256']}",
+        f"  change types: {', '.join(report['change_types'])}",
+        f"  customers: old {report['n_old']}, new {report['n_new']}",
+        f"  added: {report['added']}",
+        f"  removed: {report['removed']}",
+        f"  unchanged: {report['unchanged']}",
+        f"  moved: {report['moved']} ({moves})",
+        f"  split sizes old: {report['split_counts_old']}",
+        f"  split sizes new: {report['split_counts_new']}",
+        "  files that would have been written:",
+        *(f"    {w['action']}: {w['path']}" for w in report.get("planned_writes", [])),
+    ]
+    return "\n".join(lines)
+
+
 def run_features(paths: Paths, cfg: SplitConfig = SplitConfig()) -> dict:
     src = paths.curated / "customer_master.parquet"
     if not src.exists():
@@ -335,10 +471,14 @@ def run_features(paths: Paths, cfg: SplitConfig = SplitConfig()) -> dict:
     result = build_features(master, cfg)
 
     out = paths.features
+    # TD-3: decide before any write (including mkdir). Raises SplitDriftError, or
+    # DataContractError if the existing split cannot be read. The write order below
+    # is unchanged (TD-4 is out of scope).
+    check_split_unchanged(out, result.assignments)
     out.mkdir(parents=True, exist_ok=True)
     for name, df in result.splits.items():
         df.to_parquet(out / f"{name}.parquet", engine="pyarrow", index=False)
-    result.assignments.to_parquet(out / "split_assignments.parquet", engine="pyarrow", index=False)
+    result.assignments.to_parquet(out / SPLIT_ASSIGNMENTS_FILE, engine="pyarrow", index=False)
     # Pickle-based: only load files you produced yourself, with the same sklearn version.
     joblib.dump(result.preprocessor, out / "preprocessor.joblib")
 
