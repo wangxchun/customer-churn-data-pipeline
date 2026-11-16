@@ -97,6 +97,16 @@ def main(argv: list[str] | None = None) -> int:
                     help="REQUIRED for this command (here or before 'monitor-report')")
     mr.add_argument("--release", required=True, help="release id")
 
+    # Phase 4 W4: in-process latency/memory benchmark on synthetic rows (writes one JSON).
+    bm = sub.add_parser("benchmark", help="W4: benchmark a release (guarded vs raw path) on "
+                                          "synthetic rows; writes models/benchmarks/<id>/")
+    bm.add_argument("--data-dir", dest="sub_data_dir", type=Path, default=None, metavar="DIR",
+                    help="REQUIRED for this command (here or before 'benchmark')")
+    bm.add_argument("--release", required=True,
+                    help="release id or 'production' (required: no implicit default)")
+    bm.add_argument("--repeats", type=int, default=20)
+    bm.add_argument("--batch-size", type=int, default=1000)
+
     # Phase 4 W2 / D7: synthetic traffic from train rows. No defaults that could trigger a
     # real run: suffix, expected count, output dir and batch name must all be given.
     st = sub.add_parser("simulate-traffic", help="W2/D7: resample train rows into synthetic "
@@ -117,9 +127,10 @@ def main(argv: list[str] | None = None) -> int:
                                                  "overwritten")
 
     args = parser.parse_args(argv)
-    if args.command in ("simulate-traffic", "predict", "monitor-report"):
+    if args.command in ("simulate-traffic", "predict", "monitor-report", "benchmark"):
         # Checked before any handler runs: no stat, no read, no output without a data dir.
-        sub_parser = {"simulate-traffic": st, "predict": pr, "monitor-report": mr}[args.command]
+        sub_parser = {"simulate-traffic": st, "predict": pr, "monitor-report": mr,
+                      "benchmark": bm}[args.command]
         given = {d for d in (args.data_dir, args.sub_data_dir) if d is not None}
         if not given:
             sub_parser.error(f"--data-dir is required for {args.command} "
@@ -181,6 +192,8 @@ def main(argv: list[str] | None = None) -> int:
         return _predict_command(paths, args)
     elif args.command == "monitor-report":
         return _monitor_report_command(paths, args)
+    elif args.command == "benchmark":
+        return _benchmark_command(paths, args)
     elif args.command == "compare":
         import json
         from .evaluation import compare_runs
@@ -267,6 +280,27 @@ def _monitor_report_command(paths: Paths, args) -> int:
         print(f"refused: {type(e).__name__}: {e}", file=sys.stderr)
         return 2
     print(report, end="")
+    return 0
+
+
+def _benchmark_command(paths: Paths, args) -> int:
+    from . import release as rel
+    from .benchmark import BenchmarkError, run_benchmark
+    from .inference import ModelIntegrityError
+    try:
+        key = rel.load_guard_key()
+        r = run_benchmark(paths, args.release, key, repeats=args.repeats,
+                          batch_size=args.batch_size)
+    except (BenchmarkError, rel.ReleaseError, ModelIntegrityError, FileExistsError,
+            ValueError, OSError) as e:
+        print(f"refused: {type(e).__name__}: {e}", file=sys.stderr)
+        return 2
+    lat = r["latency_ms"]
+    print(f"Benchmark {r['benchmark_id']} written to {r['output_dir']} (release {r['release_id']})")
+    print(f"  batch {r['params']['batch_size']} p50: guarded {lat['batch']['guarded']['p50']:.2f} ms, "
+          f"raw {lat['batch']['raw']['p50']:.2f} ms")
+    print(f"  single row p50: guarded {lat['single_row']['guarded']['p50']:.2f} ms, "
+          f"raw {lat['single_row']['raw']['p50']:.2f} ms (this machine only)")
     return 0
 
 

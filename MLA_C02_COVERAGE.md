@@ -22,6 +22,7 @@ This register tracks, skill by skill, what this local learning project actually 
     - W1 release `rel-20261116T123424Z-d93c9b` was created, checked and promoted.
     - D7 traffic batch `d7-none-n1000-seed42` was generated.
     - The stage C acceptance batch `20261116T161427Z-3c5357` was predicted and monitored.
+  - W4 (uncommitted at the time of writing): the restricted run passed, 555 passed, 2 deselected (78 of them in `test_cost.py` and `test_benchmark.py`). The benchmark ran on two **synthetic** releases (LR, RF) in a temporary directory; no real release and no real data were used.
 
 ## Status codes
 
@@ -35,7 +36,7 @@ This register tracks, skill by skill, what this local learning project actually 
 | **X** | Out of scope for this project by decision (Phase 4 A1: agent skills; no fake agent is built). Neither concept coverage nor implementation |
 | **—** | Not yet assessed |
 
-Guide references: P1 = `docs/INTERNAL_GUIDE_ZH-TW.md`, P2 = `docs/PHASE2_GUIDE_ZH-TW.md`, P3 = `docs/PHASE3_GUIDE_ZH-TW.md` (chapter letters). The `docs/` folder is intentionally git-ignored (`.gitignore`), so guide references point to local files only.
+Guide references: P1 = `docs/INTERNAL_GUIDE_ZH-TW.md`, P2 = `docs/PHASE2_GUIDE_ZH-TW.md`, P3 = `docs/PHASE3_GUIDE_ZH-TW.md` (chapter letters), P4 = `docs/PHASE4_GUIDE_ZH-TW.md` (work-item chapter and section, e.g. "P4 W4 §5"). The `docs/` folder is intentionally git-ignored (`.gitignore`), so guide references point to local files only.
 
 ---
 
@@ -185,7 +186,7 @@ Real-data runs (all 2026-11-16):
 
 | Skill | Official text | Concept | Implementation | Evidence | Limitations | Next step | MP |
 |---|---|---|---|---|---|---|---|
-| 3.1.1 | Select appropriate compute environments and deployment targets. | — | **—** | Phase 3 `modeling.serving_cost()` only (in-process latency) | No benchmark or decision matrix yet | W4 benchmark + guide (planned C with W4 evidence) | — |
+| 3.1.1 | Select appropriate compute environments and deployment targets. | ✅ P4 W4 §3–4 | **C** (local evidence) | Real-time / serverless / async / batch decision matrix in the guide. W4 `benchmark` (`benchmark.py`, `test_benchmark.py`) measures guarded vs raw latency, load time and model size; **Synthetic releases only** (LR, RF; 2026-11-16), not real data | No endpoint deployed; in-process latency only; local CPU is not an AWS instance | — | — |
 | 3.1.2 | Select deployment orchestrators and multi-model or multi-container deployment strategies. | — | **—** | — | Single tabular model; no multi-model case | Guide (planned C) | — |
 | 3.1.3 | Select model inference strategies (for example, real-time and batch processing). | — | **I** (batch) **+ S** (single record) | Batch: `predict` CLI → `predict.run_predict`, `test_predict.py` (31 tests); **real data: Stage C**. Single record: `release.predict_one` / `inference.predict_one`, synthetic tests only | No real-time endpoint; single-record path is in-process, not a served endpoint | Guide: real-time vs batch vs async vs serverless | — |
 | 3.1.4 | Evaluate and select appropriate foundation model (FM) deployment options. | — | **M** | — | No FM | M1 (+ guide C) | M1 |
@@ -198,12 +199,12 @@ Real-data runs (all 2026-11-16):
 
 | Skill | Official text | Concept | Implementation | Evidence | Limitations | Next step | MP |
 |---|---|---|---|---|---|---|---|
-| 3.2.1 | Optimize resource provisioning between on-demand and provisioned resources for performance and cost efficiency. | — | **—** | — | | W4 `cost.py` (user-supplied prices) + guide (planned C + S) | — |
+| 3.2.1 | Optimize resource provisioning between on-demand and provisioned resources for performance and cost efficiency. | ✅ P4 W4 §2, §6 | **C + S** | `cost.py`: always-on vs serverless vs batch cost formulas and `compare` (cheapest first); hand-computed exact tests and refusal of ≤ 0 / NaN / inf / bool (`test_cost.py`) | Prices are user inputs (guide examples are made up); no AWS pricing or billing data | — | — |
 | 3.2.2 | Automate compute resource provisioning with integrated communication between stacks and orchestration services. | — | **—** | — | No IaC | Guide (planned C) | — |
 | 3.2.3 | Build and maintain containers for ML and AI workloads. | — | **—** | — | No Dockerfile by decision (D15) | D15 guide (planned C) | — |
 | 3.2.4 | Configure SageMaker AI endpoints within VPC network environments. | — | **—** | — | | Guide (planned C) | — |
 | 3.2.5 | Deploy and host models programmatically (for example, by using the SageMaker AI SDK for Python, AWS CLI, Boto3). | — | **—** | — | No AWS SDK by decision (D14) | Guide (planned C) | — |
-| 3.2.6 | Select specific metrics for auto scaling implementations. | — | **—** | — | | W4 (throughput → target) + guide (planned C + S) | — |
+| 3.2.6 | Select specific metrics for auto scaling implementations. | ✅ P4 W4 §3, §7 | **C + S** | `cost.invocations_per_instance_target` turns measured single-row latency into an `InvocationsPerInstance` target; guide works it out from the W4 numbers (**Synthetic releases only** (LR, RF; 2026-11-16), not real data) | No Application Auto Scaling; target not validated by a load test | — | — |
 | 3.2.7 | Create and manage Amazon Bedrock knowledge bases with vector database configurations, document indexing, and retrieval optimization. | — | **M** | — | | M1 | M1 |
 | 3.2.8 | Implement retrieval pipelines to meet business needs. | — | **M** | — | | M1 | M1 |
 | 3.2.9 | Implement agent state management systems. | — | **X** | — | Out of scope (A1) | — | — |
@@ -234,7 +235,9 @@ Real-data runs (all 2026-11-16):
 | I + S | 3.1.3 |
 | S | 3.3.1 |
 | P | 3.3.3, 3.3.5 |
-| — (planned; not done) | 3.1.1, 3.1.2, 3.1.5, 3.2.1, 3.2.2, 3.2.3, 3.2.4, 3.2.5, 3.2.6, 3.2.10, 3.3.2, 3.3.4 |
+| C + S | 3.2.1, 3.2.6 |
+| C | 3.1.1 |
+| — (planned; not done) | 3.1.2, 3.1.5, 3.2.2, 3.2.3, 3.2.4, 3.2.5, 3.2.10, 3.3.2, 3.3.4 |
 | M | 3.1.4, 3.1.7, 3.1.8, 3.2.7, 3.2.8, 3.3.7, 3.3.9, 3.3.10, 3.3.11 |
 | X | 3.1.6, 3.2.9, 3.2.11, 3.3.8 |
 
@@ -259,12 +262,12 @@ The columns and conventions are the same as in Domain 3.
 
 | Skill | Official text | Concept | Implementation | Evidence | Limitations | Next step | MP |
 |---|---|---|---|---|---|---|---|
-| 4.2.1 | Select inference instance families to optimize performance and cost. | — | **—** | — | | W4 benchmark + guide (planned C) | — |
-| 4.2.2 | Configure and use tools to troubleshoot and analyze resources (for example, Amazon CloudWatch, Amazon Bedrock AgentCore Observability, AWS X-Ray). | — | **P** | Coarse stage timings in `batch_manifest.json` and monitoring records (`load_release`, `read_input`, `predict_batch`, `write`). **Real data: Stage C** | Validate/transform/predict are not timed separately (accepted P5); no CloudWatch or X-Ray; no benchmark yet | W4 benchmark + guide | — |
+| 4.2.1 | Select inference instance families to optimize performance and cost. | ✅ P4 W4 §5 | **C** (local evidence) | Guide: instance families vs this workload (small CPU tabular models). W4 benchmark gives relative evidence (LR vs RF, guarded vs raw); **Synthetic releases only** (LR, RF; 2026-11-16), not real data | Local arm64 CPU maps to no `ml.*` instance; no Inference Recommender | — | — |
+| 4.2.2 | Configure and use tools to troubleshoot and analyze resources (for example, Amazon CloudWatch, Amazon Bedrock AgentCore Observability, AWS X-Ray). | ◐ P4 W4 §8 | **P** | Coarse stage timings in `batch_manifest.json` and monitoring records (`load_release`, `read_input`, `predict_batch`, `write`). **Real data: Stage C**. W4 benchmark separates guarded from raw latency (synthetic releases only) | Validate/transform/predict are not timed separately in `predict` (accepted P5); no CloudWatch or X-Ray; AgentCore Observability not covered | Guide: W1–W3 chapter | — |
 | 4.2.3 | Set up dashboards to monitor performance metrics. | — | **S** | `monitor-report`: a static Markdown report across batches (prints only). **Real data: Stage C** | A static report, not a dashboard | Guide: CloudWatch dashboards (C) | — |
-| 4.2.4 | Optimize capacity for cost, performance, and reliability. | — | **—** | — | | W4 + guide (planned C + S) | — |
+| 4.2.4 | Optimize capacity for cost, performance, and reliability. | ✅ P4 W4 §7 | **C + S** | Scaling target with headroom (`invocations_per_instance_target`) and cost comparison (`compare`); guide covers min/max instances, cooldown, and load time vs scale-out | Nothing is actually scaled; no reliability or load test | — | — |
 | 4.2.5 | Optimize costs and set cost quotas by using appropriate cost management tools. | — | **—** | — | | Guide (planned C) | — |
-| 4.2.6 | Optimize infrastructure costs by selecting purchasing options. | — | **—** | — | | W4 `cost.py` + guide (planned C + S) | — |
+| 4.2.6 | Optimize infrastructure costs by selecting purchasing options. | ✅ P4 W4 §6 | **C** | Guide: On-Demand, Savings Plans, Spot (training), serverless provisioned concurrency. `cost.py` takes the hourly price as an input, so a discounted rate can be plugged in | Purchasing options are not modelled in code (no commitment term or discount logic); downgraded from the planned C + S | — | — |
 | 4.2.7 | Evaluate cost implications of using FMs for inference in production. | — | **M** | — | | M1 (+ guide C) | M1 |
 | 4.2.8 | Monitor agent resource consumption patterns. | — | **X** | — | Out of scope (A1) | — | — |
 | 4.2.9 | Manage FM inference costs with usage optimization. | — | **M** | — | | M1 | M1 |
@@ -292,7 +295,9 @@ The columns and conventions are the same as in Domain 3.
 | I + S | 4.1.3 |
 | S | 4.2.3, 4.3.4 |
 | P | 4.1.1, 4.2.2, 4.3.2, 4.3.5, 4.3.9 |
-| — (planned; not done) | 4.1.4, 4.2.1, 4.2.4, 4.2.5, 4.2.6, 4.3.1, 4.3.3, 4.3.6, 4.3.8 |
+| C + S | 4.2.4 |
+| C | 4.2.1, 4.2.6 |
+| — (planned; not done) | 4.1.4, 4.2.5, 4.3.1, 4.3.3, 4.3.6, 4.3.8 |
 | M | 4.1.6, 4.2.7, 4.2.9, 4.2.10 |
 | X | 4.1.5, 4.2.8 |
 
