@@ -76,6 +76,21 @@ def main(argv: list[str] | None = None) -> int:
     pm.add_argument("--release", required=True)
     sub.add_parser("rollback", help="W1: point production back at the previous release")
 
+    # Phase 4 W2 / D7: synthetic traffic from train rows. No defaults that could trigger a
+    # real run: suffix, expected count, output dir and batch name must all be given.
+    st = sub.add_parser("simulate-traffic", help="W2/D7: resample train rows into synthetic "
+                                                 "traffic with certified synthetic IDs")
+    st.add_argument("--suffix", required=True, help="pre-approved synthetic ID suffix")
+    st.add_argument("--expected-count", required=True, type=int,
+                    help="expected number of real customer IDs (collision check)")
+    st.add_argument("--scenario", required=True,
+                    choices=["none", "price_up", "contract_mix", "unseen_payment", "nulls"])
+    st.add_argument("--n", required=True, type=int, help="rows to generate (max 10,000)")
+    st.add_argument("--seed", type=int, default=42)
+    st.add_argument("--out-dir", required=True, type=Path)
+    st.add_argument("--name", required=True, help="batch name; an existing batch is never "
+                                                 "overwritten")
+
     args = parser.parse_args(argv)
     paths = Paths(args.data_dir)
 
@@ -124,6 +139,8 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Diagnostics written to {out['dir']}")
     elif args.command in ("release", "check-release", "promote", "rollback"):
         return _release_command(paths, args)
+    elif args.command == "simulate-traffic":
+        return _simulate_command(paths, args)
     elif args.command == "compare":
         import json
         from .evaluation import compare_runs
@@ -155,6 +172,25 @@ def _release_command(paths: Paths, args) -> int:
     except (rel.ReleaseError, ModelIntegrityError, FileExistsError) as e:
         print(f"refused: {e}", file=sys.stderr)
         return 2
+    return 0
+
+
+def _simulate_command(paths: Paths, args) -> int:
+    from . import simulate as sim
+    from .traffic import SuffixCertificationError
+    try:
+        sim.ensure_batch_absent(args.out_dir, args.name)  # before any data is read
+        source = sim.load_traffic_source(paths, suffix=args.suffix,
+                                         expected_count=args.expected_count)
+        df = sim.generate_traffic(source, args.scenario, args.n, args.seed)
+        path = sim.write_traffic(df, args.out_dir, args.name, scenario=args.scenario,
+                                 seed=args.seed, certificate=source.certificate)
+    except (SuffixCertificationError, sim.TrafficSourceError, FileExistsError,
+            FileNotFoundError, ValueError, OSError) as e:
+        print(f"refused: {type(e).__name__}: {e}", file=sys.stderr)
+        return 2
+    print(f"Synthetic traffic written to {path} ({len(df)} rows, scenario {args.scenario}, "
+          f"IDs NNNN-{source.certificate.suffix})")
     return 0
 
 
