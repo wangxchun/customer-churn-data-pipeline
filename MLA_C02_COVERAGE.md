@@ -23,7 +23,7 @@ This register tracks, skill by skill, what this local learning project actually 
     - D7 traffic batch `d7-none-n1000-seed42` was generated.
     - The stage C acceptance batch `20261116T161427Z-3c5357` was predicted and monitored.
   - W4, commit `4287613`: the restricted run passed, 555 passed, 2 deselected (78 of them in `test_cost.py` and `test_benchmark.py`). The benchmark ran on two **synthetic** releases (LR, RF) in a temporary directory; no real release and no real data were used.
-  - W6 (uncommitted at the time of writing): `test_ab.py` uses synthetic IDs only. There was no real-data run, and none is needed: `ab.py` reads no data.
+  - W6, commit `4324cd3`: the restricted run passed, 609 passed, 2 deselected (54 of them in `test_ab.py`). `test_ab.py` uses synthetic IDs only. There was no real-data run, and none is needed: `ab.py` reads no data.
 
 ## Status codes
 
