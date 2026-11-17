@@ -162,7 +162,7 @@ Every Domain 2 row has AWS hands-on status "none".
 
 ## Domain 3: Deployment and Orchestration of ML and AI Workflows
 
-The columns are the same as in Domain 2. **Concept** refers to a Phase 4 guide, which doesn't exist yet, so it is "—" everywhere.
+The columns are the same as in Domain 2. **Concept** refers to the Phase 4 guide, `docs/PHASE4_GUIDE_ZH-TW.md` (P4). It uses the Concept-column legend above: ✅, ◐, `concept deferred` or —.
 
 In Domains 3 and 4:
 - **"—" in Implementation** means nothing is implemented yet; the Next step column names the planned work item.

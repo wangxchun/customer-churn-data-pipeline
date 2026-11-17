@@ -27,7 +27,7 @@ churn-pipeline build-features          # Phase 2: split, fit preprocessing on tr
 churn-pipeline train                   # Phase 3: tune, select, threshold (train/validation only)
 churn-pipeline diagnose --run <run_id> # Phase 3: learning diagnostics (never affects selection)
 churn-pipeline evaluate --run <run_id> # Phase 3: the one-time test-set evaluation
-pytest                                 # run the tests
+pytest -m "not real_data"              # run the tests that read no real data (see Tests)
 ```
 
 To simulate events arriving over time:
@@ -230,7 +230,13 @@ The skills below are taken from the official [MLA-C02 Domain 1 guide](https://do
 - **Conflict policy is "first seen wins".** A deliberate correction from upstream would be rejected and need manual handling.
 - **Orphan events are stored but not re-checked automatically.** If a matching customer arrives later, the features pick the events up on the next run, but nothing raises an alert about it.
 - Validation runs row by row in Python, which is clear but slow above roughly 10⁶ rows.
-- **Known open bugs:** `replace_table()` isn't atomic, and `events.event_id` accepts `NULL` at the database level. Neither affects Phase 2 outputs. Details, failure scenarios, and planned fixes are in [`TECH_DEBT.md`](TECH_DEBT.md).
+- **Known open bugs:**
+  - `replace_table()` isn't atomic (TD-1).
+  - `events.event_id` accepts `NULL` at the database level (TD-2).
+  - Phase 2 feature files are overwritten one at a time, not as a set (TD-4).
+  - `evaluate` and `diagnose` unpickle models without checking `model_sha256` (TD-6).
+
+  None of them affects Phase 2 outputs. Details, failure scenarios, and planned fixes are in [`TECH_DEBT.md`](TECH_DEBT.md).
 
 ## Phase 2: features and leakage prevention
 
@@ -312,6 +318,7 @@ Everything here runs locally. There is no AWS deployment, and the AWS services n
 churn-pipeline release --run <run_id> [--waive-dirty-code REASON --waiver-approved-on YYYY-MM-DD]
 churn-pipeline check-release --release <release_id>
 churn-pipeline promote --release <release_id>
+churn-pipeline rollback                # one level: back to the previous release
 churn-pipeline simulate-traffic --data-dir DIR --suffix SYNTR --expected-count N --scenario none --n 1000 --seed 42 --out-dir DIR --name NAME
 churn-pipeline predict --data-dir DIR --input batch.parquet [--release production]
 churn-pipeline monitor-report --data-dir DIR --release <release_id>
@@ -350,12 +357,12 @@ churn-pipeline --data-dir DIR benchmark --release <release_id> [--repeats 20 --b
 ## Tests
 
 ```bash
-pytest -v
+pytest -v -m "not real_data"
 ```
 
 The tests use small handcrafted fixtures and don't need the download. They cover normal operation, malformed CSV, JSON, and JSONL, missing columns, duplicate and conflicting events, crash rollback, unmatched IDs, join multiplication, and idempotent re-runs. `tests/test_real_dataset.py` also checks the real file's checksum, row count, and the quirk above; it is skipped if the file hasn't been downloaded. Phase 3 tests (`test_modeling.py`, `test_evaluation.py`, `test_diagnostics.py`) use a small synthetic master with a churn signal. They cover test-set isolation (scrambling test rows changes nothing; a spy model never sees a test customer), per-fold preprocessing, agreement with `train.parquet`, stale-input refusal, the selection rule, determinism, atomic run directories, and the one-time test lock.
 
-Phase 4 tests (`test_inference.py`, `test_split_drift.py`, `test_release.py`, `test_traffic.py`, `test_simulate.py`, `test_predict.py`, `test_monitoring.py`, `test_benchmark.py`, `test_cost.py`, `test_ab.py`, `test_ci_check.py` and `test_secret_scan.py`) use synthetic fixtures and temporary directories only. `test_repo_hygiene.py` reads only this repository's git metadata and the files git would commit, never `data/` or `docs/`.
+Phase 4 tests (`test_inference.py`, `test_split_drift.py`, `test_release.py`, `test_traffic.py`, `test_simulate.py`, `test_predict.py`, `test_monitoring.py`, `test_benchmark.py`, `test_cost.py`, `test_ab.py`, `test_ci_check.py`, `test_secret_scan.py` and `test_release_permissions.py`) use synthetic fixtures and temporary directories only. `test_repo_hygiene.py` reads only this repository's git metadata and the files git would commit, never `data/` or `docs/`.
 
 Five tests read the real data when it is present, and all of them carry the `real_data` marker: `test_features.py::test_real_master_feature_build`, `test_modeling.py::test_real_data_preprocessor_reproduces_train_parquet_exactly`, and the three tests in `test_real_dataset.py`. To run everything else without touching real data:
 
@@ -371,7 +378,7 @@ pytest -q --strict-markers -m "not real_data"
 scripts/ci_check.sh
 ```
 
-The script runs three steps in order and stops at the first failure: `compileall` (syntax only), the secret scan, and `pytest -m "not real_data"`. It exits 0 when everything passes, 1 when a step fails (the step is named), and 2 on a usage error. It does not run `check-release`, because that reads the champion model and the split file, needs the guard key, and can append to the audit log. On 2026-11-16 it gave 670 passed and 5 deselected, with 0 secret-scan findings.
+The script runs three steps in order and stops at the first failure: `compileall` (syntax only), the secret scan, and `pytest -m "not real_data"`. It exits 0 when everything passes, 1 when a step fails (the step is named), and 2 on a usage error. It does not run `check-release`, because that reads the champion model and the split file, needs the guard key, and can append to the audit log. On 2026-11-16, at commit `521089e`, it gave 671 passed and 5 deselected, with 0 secret-scan findings.
 
 **Secret scan limits:**
 - It is a regex scan for known formats only, with no entropy detection.

@@ -10,7 +10,7 @@ Planned cleanup: after the MLA-C02 Domain 1–4 study block, as a separate bug-f
 | TD-2 | Open (re-confirmed 2026-11-05) | Low | No |
 | TD-3 | Fixed 2026-11-16 (commit `9114abd`); policy: refuse + move report (recorded 2026-11-06; Phase 3 mitigation 2026-11-08) | Medium | No. Phase 3 refuses cross-split comparisons; see note |
 | TD-4 | Open (recorded 2026-11-06) | Low | No |
-| TD-5 | Fixed 2026-11-16 (commit: pending, user commit) (recorded 2026-11-06) | Medium | No. Inference must go through `churn_pipeline.inference`; see Fix |
+| TD-5 | Fixed 2026-11-16 (commit `180714d`) (recorded 2026-11-06) | Medium | No. Inference must go through `churn_pipeline.inference`; see Fix |
 | TD-6 | Open (recorded 2026-11-16) | Low | No |
 
 ---
@@ -151,7 +151,7 @@ Planned cleanup: after the MLA-C02 Domain 1–4 study block, as a separate bug-f
   - Phase 3 has no inference entry point. `train`, `evaluate` and `compare` only score rows that went through `load_verified_inputs()` (`check_input()` + `_to_model_frame()`).
   - Two small additions: `evaluate` refuses to unpickle a model if the installed scikit-learn version differs from the one recorded in the run manifest, and `diagnostics.drift_experiment` *demonstrates* the unseen-category case (20% `payment_method = "Crypto wallet"`). Feature PSI flags it (1.62), the champion's score distribution barely moves (score PSI 0.002), and no error is raised.
   - TD-5 stays Open and still blocks Phase 4. (As of 2026-11-08; fixed 2026-11-16, see below.)
-- **Fix (2026-11-16; commit: pending, user commit).** New module `src/churn_pipeline/inference.py`. It is a library only: no CLI, and it writes no files.
+- **Fix (2026-11-16; commit `180714d`).** New module `src/churn_pipeline/inference.py`. It is a library only: no CLI, and it writes no files.
   - **`load_model(run_dir)`** reads only the run directory's `manifest.json`, `selection.json` and `model.joblib`.
     - Before unpickling, it checks: the manifest fields; `run_id` against the directory name; the sha256 of `model.joblib` and `selection.json` against the manifest; the scikit-learn version against the installed one; and that the threshold matches between `selection.json` and the manifest.
     - After unpickling, it checks: `feature_names_in_ == FEATURE_COLUMNS`; `classes_ == [0, 1]`; and that the encoder's learned categories are a subset of the Phase 1 allowed values.
@@ -182,8 +182,8 @@ Planned cleanup: after the MLA-C02 Domain 1–4 study block, as a separate bug-f
   - **Real champion smoke test** (T5-Q2: one time, read-only, no scoring): `load_model` on `20261108T104225Z-cdbbaf` passed all checks (15 categorical columns, 40 output features, threshold 0.2022). It read no data files, and the artifact mtimes were unchanged.
   - **Remaining limits:**
     - The manifest is not signed. Rewriting both `manifest.json` and `model.joblib` defeats the hash check.
-    - Test-customer IDs are not refused yet; that is the W1 holdout guard.
-    - Writing reject files belongs to W2.
+    - `inference.py` itself does not refuse test-customer IDs. That is done by the W1 holdout guard in `release.predict_batch`, which runs before this validation (commit `0c4f6a7`).
+    - `inference.py` writes no files. Reject files are written by W2's `predict.run_predict` (commit `ac450e0`).
     - `evaluate` and `diagnostics` still unpickle without a hash check: see TD-6.
 
 ## TD-6: `evaluate` and `diagnostics` unpickle models without verifying `model_sha256`
